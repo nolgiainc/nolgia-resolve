@@ -3,7 +3,7 @@
 # Copyright (C) 2026 NOLGIA Inc
 """Build the NOLGIA for DaVinci Resolve download (Python 3, standard library).
 
-    python3 resolve/build.py            # resolve/dist/nolgia-resolve-<version>.zip
+    python3 build.py            # dist/nolgia-resolve-<version>.zip
 
 The zip holds:
 
@@ -104,7 +104,7 @@ def build(out_dir=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--out-dir", default=None, help="where to write the zip (default resolve/dist)")
+    parser.add_argument("--out-dir", default=None, help="where to write the zip (default dist)")
     opts = parser.parse_args(argv)
     path = build(opts.out_dir)
     print(path)

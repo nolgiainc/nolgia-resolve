@@ -22,8 +22,8 @@
 It needs External scripting set to Local (to start the script and make the
 project) and DaVinci Resolve open with its window.
 
-    python3 resolve/tests/inapp_resolve.py
-    python3 resolve/tests/inapp_resolve.py --api prod --token-file ~/.config/nolgia/tokens.json
+    python3 tests/inapp_resolve.py
+    python3 tests/inapp_resolve.py --api prod --token-file ~/.config/nolgia/tokens.json
 
 With --api prod the window talks to the real NOLGIA API with your token
 (never printed); the run's assets are deleted afterwards unless

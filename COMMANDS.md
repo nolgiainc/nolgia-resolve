@@ -2,7 +2,7 @@
 
 The command contract of the NOLGIA plugin for DaVinci Resolve Studio
 (app id `resolve`): what each command takes and returns. How to install and
-use the plugin is in the [main README](../README.md#nolgia-for-davinci-resolve).
+use the plugin is in the [README](README.md).
 
 Commands reach the plugin through the NOLGIA API (`POST /bridge/commands`
 with `"app": "resolve"`, a `kind` and `args`) and the MCP tools built on it.
