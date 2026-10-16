@@ -9,8 +9,8 @@ import urllib.error
 import urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-PLUGIN_DIR = os.path.dirname(HERE)          # resolve/
-REPO = os.path.dirname(PLUGIN_DIR)
+PLUGIN_DIR = os.path.dirname(HERE)          # the repository's root
+REPO = PLUGIN_DIR
 PACKAGE_DIR = os.path.join(PLUGIN_DIR, "nolgia_resolve")
 for path in (PLUGIN_DIR, HERE, os.path.join(REPO, "tools")):
     if path not in sys.path:

@@ -38,10 +38,7 @@ def string_literals(path):
 
 def resolve_readme():
     with open(os.path.join(support.REPO, "README.md"), encoding="utf-8") as handle:
-        text = handle.read()
-    start = text.index("## NOLGIA for DaVinci Resolve")
-    end = text.find("\n## ", start + 10)
-    return text[start:end if end > 0 else None]
+        return handle.read()
 
 
 class License(unittest.TestCase):
@@ -63,8 +60,7 @@ class License(unittest.TestCase):
     def test_listed_in_the_readme(self):
         with open(os.path.join(support.REPO, "README.md"), encoding="utf-8") as handle:
             text = handle.read()
-        self.assertIn("| [`resolve/`](resolve/) | DaVinci Resolve Studio 21.1 and newer | GPL-3.0-or-later "
-                      "([`resolve/LICENSE`](resolve/LICENSE)) |", text)
+        self.assertIn("GPL-3.0-or-later ([`LICENSE`](LICENSE))", text)
 
 
 class Wording(unittest.TestCase):
@@ -75,7 +71,7 @@ class Wording(unittest.TestCase):
         for path in paths:
             with open(path, encoding="utf-8") as handle:
                 texts.append((path, handle.read()))
-        texts.append(("README.md (Resolve section)", resolve_readme()))
+        texts.append(("README.md", resolve_readme()))
         for name, text in texts:
             self.assertNotIn(EM_DASH, text, "%s has an em dash" % name)
 

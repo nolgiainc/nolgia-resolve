@@ -23,9 +23,9 @@ against the mock API.
    Resolve it started.
 
 Usage:
-    python3 resolve/tests/e2e_resolve.py
-    python3 resolve/tests/e2e_resolve.py --use-running --keep
-    python3 resolve/tests/e2e_resolve.py --use-running --api prod --token-file ~/.config/nolgia/tokens.json
+    python3 tests/e2e_resolve.py
+    python3 tests/e2e_resolve.py --use-running --keep
+    python3 tests/e2e_resolve.py --use-running --api prod --token-file ~/.config/nolgia/tokens.json
 
 With --api prod it runs against the real NOLGIA API with your token (never
 printed): the commands an agent reaches through the MCP server go through
@@ -57,7 +57,7 @@ import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN_DIR = os.path.dirname(HERE)
-REPO = os.path.dirname(PLUGIN_DIR)
+REPO = PLUGIN_DIR  # the plugin is the repository's root
 sys.path.insert(0, os.path.join(REPO, "tools"))
 sys.path.insert(0, PLUGIN_DIR)
 

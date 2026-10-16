@@ -2,8 +2,8 @@
 # Copyright (C) 2026 NOLGIA Inc
 """Pure Python parts of the NOLGIA plugin for DaVinci Resolve.
 
-A copy of blender/core: the same files, kept the same by
-resolve/tests/test_core_copy.py, which lists the few places they may differ
+A copy of the Blender plugin's core/ (nolgiainc/nolgia-blender): the same
+files, kept the same by tests/test_core_copy.py, which lists the few places they may differ
 (this file's constants, the per-app argument checks in commands.py, and the
 app's name in messages). Nothing in this package talks to Resolve.
 """

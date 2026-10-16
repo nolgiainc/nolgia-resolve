@@ -1,0 +1,55 @@
+name: Release
+
+# Push a tag resolve-v<version> (PLUGIN_VERSION in
+# nolgia_resolve/core/__init__.py) and this builds nolgia-resolve-<version>.zip
+# (build.py: reproducible, entries sorted and dated 2026-01-01) and attaches it
+# to a draft release of that tag. Publish the draft by hand after reading it;
+# the website links to the file by that exact name. A file that is already on
+# the release is never replaced.
+
+on:
+  push:
+    tags: ["resolve-v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and attach the zip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+      - name: Build
+        run: |
+          version="${GITHUB_REF_NAME#resolve-v}"
+          plugin=$(sed -nE 's/^PLUGIN_VERSION = "([^"]+)"$/\1/p' nolgia_resolve/core/__init__.py)
+          if [ "$version" != "$plugin" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match PLUGIN_VERSION $plugin in nolgia_resolve/core/__init__.py"
+            exit 1
+          fi
+          python build.py --out-dir "$RUNNER_TEMP/dist"
+          out="$RUNNER_TEMP/dist/nolgia-resolve-$version.zip"
+          test -f "$out"
+          echo "OUT=$out" >> "$GITHUB_ENV"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$OUT"
+          else
+            gh release create "$GITHUB_REF_NAME" "$OUT" --draft --verify-tag \
+              --title "NOLGIA for DaVinci Resolve $VERSION" \
+              --notes "NOLGIA for DaVinci Resolve Studio $VERSION (21.1 and newer). Unzip nolgia-resolve-$VERSION.zip and run install.cmd (Windows) or install.sh (macOS, Linux). See the README."
+          fi

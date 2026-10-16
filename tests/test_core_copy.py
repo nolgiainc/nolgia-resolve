@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""resolve/nolgia_resolve/core is a copy of blender/core. This test fails as
-soon as the two drift apart, so a fix made in one is made in the other.
+"""nolgia_resolve/core is a copy of the Blender plugin's core/ (in
+nolgiainc/nolgia-blender). This test fails as soon as the two drift apart,
+so a fix made in one is made in the other.
+
+It reads the Blender plugin from NOLGIA_BLENDER (a nolgia-blender checkout)
+when that is set, else from a nolgia-blender checkout beside this one, and
+is skipped when neither is there. CI checks out nolgia-blender and sets
+NOLGIA_BLENDER, so there it always runs.
 
 The only differences allowed, and why:
 
@@ -22,7 +28,8 @@ import unittest
 
 import support
 
-BLENDER_CORE = os.path.join(support.REPO, "blender", "core")
+BLENDER_REPO = os.environ.get("NOLGIA_BLENDER") or os.path.join(os.path.dirname(support.REPO), "nolgia-blender")
+BLENDER_CORE = os.path.join(BLENDER_REPO, "core")
 RESOLVE_CORE = os.path.join(support.PACKAGE_DIR, "core")
 
 PER_APP_INIT = {"APP", "DEVICE_CLIENT_ID", "PLUGIN_VERSION"}
@@ -78,6 +85,8 @@ def as_blender(text):
     return text.replace("DaVinci Resolve", "Blender")
 
 
+@unittest.skipUnless(os.environ.get("NOLGIA_BLENDER") or os.path.isdir(BLENDER_CORE),
+                     "no nolgia-blender checkout beside this one (or set NOLGIA_BLENDER)")
 class CoreCopy(unittest.TestCase):
     maxDiff = 4000
 
@@ -91,7 +100,7 @@ class CoreCopy(unittest.TestCase):
             with self.subTest(file=name):
                 self.assertEqual(
                     as_blender(read(RESOLVE_CORE, name)), read(BLENDER_CORE, name),
-                    "resolve/nolgia_resolve/core/%s drifted from blender/core/%s; copy the change over" % (name, name),
+                    "nolgia_resolve/core/%s drifted from nolgia-blender core/%s; copy the change over" % (name, name),
                 )
 
     def test_commands_differ_only_in_the_argument_checks(self):

@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Unit tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.9", "3.14"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: nolgia-resolve
+          persist-credentials: false
+      # nolgia_resolve/core is a copy of the Blender plugin's core/;
+      # tests/test_core_copy.py compares the two.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: nolgiainc/nolgia-blender
+          path: nolgia-blender
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Unit tests
+        working-directory: nolgia-resolve
+        env:
+          NOLGIA_BLENDER: ${{ github.workspace }}/nolgia-blender
+        run: python -m unittest discover -s tests -p 'test_*.py'
+      - name: Build the download
+        working-directory: nolgia-resolve
+        run: python build.py --out-dir "$RUNNER_TEMP/dist"
