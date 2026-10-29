@@ -214,6 +214,26 @@ class OtherSystems(unittest.TestCase):
         self.assertEqual(sorted(os.listdir(target)), ["NOLGIA.py", "nolgia_resolve.zip"])
         self.assertIn("Restart DaVinci Resolve", out.stdout)
 
+    @unittest.skipIf(os.name == "nt", "POSIX shell")
+    def test_install_sh_with_resolve_open_says_how_to_quit(self):
+        folder = tempfile.mkdtemp(dir=self.tmp)
+        with zipfile.ZipFile(build.build(self.tmp)) as archive:
+            archive.extractall(folder)
+        bin_dir = os.path.join(self.tmp, "bin")
+        os.makedirs(bin_dir)
+        with open(os.path.join(bin_dir, "pgrep"), "w") as handle:
+            handle.write("#!/bin/sh\nexit 0\n")
+        os.chmod(os.path.join(bin_dir, "pgrep"), 0o755)
+        home = os.path.join(self.tmp, "home")
+        env = dict(os.environ, HOME=home, PATH=bin_dir + os.pathsep + os.environ["PATH"])
+        out = subprocess.run(["sh", os.path.join(folder, "install.sh")], capture_output=True, text=True, env=env,
+                             timeout=60)
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertIn("Close the NOLGIA window if it is open.", out.stdout)
+        self.assertIn("Quit DaVinci Resolve", out.stdout)
+        target = os.path.join(home, ".local", "share", "DaVinciResolve", "Fusion", "Scripts", "Utility")
+        self.assertEqual(sorted(os.listdir(target)), ["NOLGIA.py", "nolgia_resolve.zip"])
+
     def test_sign_in_page_opens_with_webbrowser(self):
         from nolgia_resolve import runtime
 

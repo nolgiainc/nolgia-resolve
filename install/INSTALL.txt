@@ -4,7 +4,11 @@ Lets your NOLGIA agent work in DaVinci Resolve Studio 21.1 or newer (Resolve
 runs scripts only in the Studio edition since 21.1).
 
 Install
-1. Quit DaVinci Resolve.
+1. Close the NOLGIA window if it is open, then quit DaVinci Resolve
+   (DaVinci Resolve > Quit DaVinci Resolve, or Command-Q on a Mac). With
+   NOLGIA 0.2.2 or older open, a quit leaves Resolve running with no windows;
+   if that happened, force quit it (Option-Command-Esc on a Mac, Task Manager
+   on Windows). 0.2.3 and newer finish the quit themselves.
 2. Run the installer for your system. It copies two files into Resolve's
    Scripts folder for your user, so it needs no administrator rights:
      Windows:        double-click install.cmd

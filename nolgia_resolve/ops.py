@@ -57,6 +57,13 @@ NO_PAGE = (
     "project in Resolve (or use the open command), then try again.")
 
 
+class CodeApproval(ApprovalRequest):
+    """A request whose lines are code: the NOLGIA request window shows them as
+    Python. Every other request (a DIT copy, opening a project) is plain text."""
+
+    is_code = True
+
+
 def call(obj, method, *args, default=None):
     """obj.method(*args), or `default` when obj is None or the call fails."""
     if obj is None:
@@ -364,7 +371,7 @@ class Ops:
         if not ask:
             return None
         code = command.args.get("code", "")
-        return ApprovalRequest(
+        return CodeApproval(
             "%s wants to run Python in DaVinci Resolve" % command.caller_label,
             code.splitlines() or [""],
             headless_error="Ask before running code is on, and DaVinci Resolve has no NOLGIA window to ask in, "

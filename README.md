@@ -39,11 +39,17 @@ Apple's Python 3.9 also on that Mac, so a Mac needs no Python installed.
    and unzip it. Safari unzips it by itself, into a folder named up to the
    first dot (`nolgia-resolve-0`); `sh ~/Downloads/nolgia-resolve-0*/install.sh`
    finds that folder or the one a double-click makes.
-2. Quit DaVinci Resolve and run the installer: on Windows double-click
-   `install.cmd`; on macOS or Linux run `sh install.sh` in Terminal, in the
-   unzipped folder. It copies `NOLGIA.py` and `nolgia_resolve.zip` from the
-   `Utility` folder into Resolve's Scripts folder for your user, so it needs
-   no administrator rights. To do it by hand, copy those two files into:
+2. Close the NOLGIA window if it is open, quit DaVinci Resolve (DaVinci
+   Resolve > Quit DaVinci Resolve, or Command-Q on a Mac) and run the
+   installer: on Windows double-click `install.cmd`; on macOS or Linux run
+   `sh install.sh` in Terminal, in the unzipped folder. (With NOLGIA 0.2.2 or
+   older open, a quit leaves Resolve running with no windows; if that
+   happened, force quit it with Option-Command-Esc on a Mac or Task Manager
+   on Windows. 0.2.3 and newer finish the quit themselves, see Known limits.
+   If Resolve is still open, the installer says so and installs anyway.) It
+   copies `NOLGIA.py` and `nolgia_resolve.zip` from the `Utility` folder into
+   Resolve's Scripts folder for your user, so it needs no administrator
+   rights. To do it by hand, copy those two files into:
    - Windows: `%APPDATA%\Blackmagic Design\DaVinci Resolve\Support\Fusion\Scripts\Utility`
    - macOS: `~/Library/Application Support/Blackmagic Design/DaVinci Resolve/Fusion/Scripts/Utility`
    - Linux: `~/.local/share/DaVinciResolve/Fusion/Scripts/Utility`
@@ -244,16 +250,48 @@ the project since it was last saved.
   under 3.11 inside Resolve and under Resolve's own 3.14 with `--serve`.
 - Resolve finds new scripts when it starts, so restart it after installing or
   updating.
+- Resolve does not finish a quit (DaVinci Resolve > Quit DaVinci Resolve,
+  Command-Q, the close button of its main window) while a script's window is
+  open: it closes the project, opens a new Untitled Project, asks script
+  windows to close and, as the script is still running at that moment, gives
+  the quit up and stays open with no windows. That happens with any script
+  window, even a minimal one that closes at once, and never without one
+  (Resolve Studio 21.1.1 on Windows 11; the same on the owner's Mac). Only a
+  script's own `resolve.Quit()` finishes it. So 0.2.3 tells Resolve's quit
+  from someone closing the NOLGIA window (a Close right after the project
+  changed, with none of Resolve's own windows left on screen where Windows
+  can say), closes and calls `resolve.Quit()`. On macOS it reads only the
+  project change, so closing the NOLGIA window within 1.5 seconds of opening
+  another project would also quit Resolve.
 
 ## Tested on
 
-0.2.2 (October 29, 2026), from the owner's Mac test of 0.2.1: on macOS
-Resolve let the window be dragged shorter than its minimum height, and below
-about 650 pt the text box sat over the chat, so the window now puts its
-height back to the minimum; the plugin reports the computer's own name (on a
-Mac the one in System Settings > General > About) and its operating system,
-and the sign in page names DaVinci Resolve. Unit tests on Windows; on macOS
-it waits for its re-test.
+0.2.3 (October 29, 2026), from the owner's second Mac test (of 0.2.2): when the
+window is dragged shorter than its minimum, the chat's thread, the text box
+and the Activity list give up height and scroll instead of the text box
+covering the chat, and the height is put back on every tick (50 ms) instead
+of every half second; the NOLGIA request window shows a plain-English plan (a
+DIT copy, opening a project) as plain text and only code as Python. Checked
+in Resolve Studio 21.1.1 on Windows 11 with the window's minimum lowered to
+let it shrink as macOS does (to 628 px there): at every height from 780 down,
+0.2.2's thread ran 23 px under the text box and 0.2.3's ended above it; the
+height came back in one tick; the in-app test passed (12/12). Quitting
+Resolve with the NOLGIA window open now quits it: with 0.2.2's window open,
+closing Resolve's main window left Resolve running with no windows (still
+after 60 s), and with no script running it quit in 7 s; with 0.2.3's window
+open it quit in 8 s, and in 10 s with the NOLGIA window minimized, while
+closing only the NOLGIA window, also right after opening another project,
+left Resolve open.
+On macOS it waits for its re-test.
+
+0.2.2 on macOS 26.6.2 (Apple silicon) with DaVinci Resolve Studio 21.1.1, on
+October 29, 2026 (the owner's second Mac test): installed over 0.2.1 with
+install.sh; the sign in page named DaVinci Resolve and connected nothing
+until Connect; the session carried the Mac's own name and macOS; info and
+run commands; a DIT offload approved in the NOLGIA request window and
+verified. One failure: dragged below its minimum, the window sat at 646 pt
+for about 0.75 s before its height came back, and the text box covered the
+chat meanwhile (fixed in 0.2.3).
 
 0.2.1 on macOS 26.6.2 (Apple silicon) with DaVinci Resolve Studio 21.1.1, on
 October 29, 2026: installed over 0.1.1 with install.sh, signed in, connected,
