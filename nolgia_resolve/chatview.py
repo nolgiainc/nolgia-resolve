@@ -52,7 +52,9 @@ def thread_html(view):
             out.append("<p>%s%s</p>" % ("&#8226; " if block["type"] == "li" else "", body))
         if row["failure"]:
             out.append('<p style="color:#ff8a80">%s</p>' % html.escape(row["failure"]))
-        if row["question"]:
+        # The answer buttons show only for a question that offers answers; an
+        # open question (options: []) is answered by typing.
+        if row["question"] and any(isinstance(o, dict) and o.get("label") for o in row["question"].get("options") or []):
             out.append('<p style="color:#8a8a8a">Answer with a button below, or type your own.</p>')
         if row["credits"] is not None and row["status"] == "complete":
             out.append('<p style="color:#8a8a8a; font-size:small">%s credits</p>' % _number(row["credits"]))
