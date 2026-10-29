@@ -106,6 +106,9 @@ def main():
     parser.add_argument("--token-file", default=os.path.expanduser("~/.config/nolgia/tokens.json"),
                         help="JSON with access_token, for --api prod (never printed)")
     parser.add_argument("--keep-assets", action="store_true", help="prod: leave the run's assets in the library")
+    parser.add_argument("--hold", type=float, default=0.0,
+                        help="mock: keep each state of the NOLGIA Agent chat on screen this many seconds "
+                             "(prints CHAT_STATE <name> first), to look at or photograph it")
     opts = parser.parse_args()
     prod = opts.api == "prod"
     if e2e.WSL and opts.resolve_python[1:3] == ":\\":
@@ -268,6 +271,110 @@ def main():
             print("  commands run on: %s" % res["value"], flush=True)
 
         checks.check("commands run from the UIManager timer", timer_runs_commands)
+
+        def in_window(code):
+            """Run code in the window's script (on its main thread, as every command does)."""
+            return expect_ok(caller.command("run", {"code": code}))["value"]
+
+        def chat_shown():
+            return in_window("\n".join([
+                "from nolgia_resolve import panel",
+                "w = panel.current",
+                "it = w.items",
+                "ids = ('ChatIntro', 'Thread', 'ChatWorking', 'ChatNotice', 'ChatAction', 'Stop', 'OpenWeb', 'Option0')",
+                "result = {'visible': [i for i in ids if not it[i].Hidden], 'thread': it['Thread'].PlainText,",
+                "          'working': it['ChatWorking'].Text, 'notice': it['ChatNotice'].Text,",
+                "          'action': it['ChatAction'].Text, 'send': bool(it['Send'].Enabled), 'cost': it['ChatCost'].Text,",
+                "          'box': it['Box'].PlainText, 'option0': it['Option0'].Text}",
+            ]))
+
+        def wait_chat(predicate, what, limit=30):
+            end = time.time() + limit
+            shown = None
+            while time.time() < end:
+                shown = chat_shown()
+                if predicate(shown):
+                    return shown
+                time.sleep(0.5)
+            raise AssertionError("the chat did not show %s: %s" % (what, shown))
+
+        def hold(name):
+            if opts.hold > 0:
+                print("CHAT_STATE %s" % name, flush=True)
+                time.sleep(opts.hold)
+
+        def send_from_the_window(text):
+            # Type into the box and click Send, through the window's own handlers.
+            in_window("\n".join([
+                "from nolgia_resolve import panel",
+                "w = panel.current",
+                "w._put_in_box(%r)" % text,
+                "w._send_from_box()",
+                "result = True",
+            ]))
+
+        def chat_in_the_window():
+            if prod:
+                print("  (the chat against the real API: a live NOLGIA Agent turn, not part of this test)", flush=True)
+                return
+            first = wait_chat(lambda s: "ChatIntro" in s["visible"], "its first look")
+            assert first["send"] and "each turn from" in first["cost"], first
+            hold("first-look")
+            # The first look with a notice: the most the window shows at once fits.
+            in_window("from nolgia_resolve import panel\npanel.current.controller.set_setting('allow_agent', False)\n"
+                      "result = True")
+            wait_chat(lambda s: s["action"] == "Allow NOLGIA Agent", "the first look with the blocker")
+            hold("first-look-blocked")
+            in_window("from nolgia_resolve import panel\npanel.current.controller.fix_chat_blocker()\nresult = True")
+            wait_chat(lambda s: s["send"], "the blocker gone")
+            send_from_the_window("Add my newest NOLGIA clip to the end of the timeline.")
+            shown = wait_chat(lambda s: "ChatWorking" in s["visible"] and not s["send"], "a turn working")
+            created = caller.state()["agent_creates"]
+            assert created and created[-1]["app"] == {"app": "resolve", "instance_id": env["NOLGIA_INSTANCE_ID"]}, created
+            assert shown["box"] == "", shown
+            hold("working")
+            caller.http("POST", "/mock/agent/reply", {"content": "I added **sunset-wall.png** to the end of NOLGIA "
+                                                                 "timeline.\n\n- 5 seconds long\n- on track V1\n\n"
+                                                                 "Open it on https://nolgia.ai/agent if you like."})
+            shown = wait_chat(lambda s: "ChatWorking" not in s["visible"] and "sunset-wall.png" in s["thread"], "the reply")
+            assert shown["send"] and "OpenWeb" in shown["visible"], shown
+            hold("reply")
+            # A long thread: every part stays in reach, the newest reply is shown.
+            for n in range(6):
+                send_from_the_window("Step %d: trim the clip on V1 by one second." % (n + 1))
+                wait_chat(lambda s: not s["send"], "turn %d working" % (n + 1))
+                caller.http("POST", "/mock/agent/reply", {"content": "Step %d done. I trimmed one second from the "
+                                                                     "end of the clip on V1, so it now runs %d seconds. "
+                                                                     "Nothing else on the timeline moved." % (n + 1, 10 - n)})
+                wait_chat(lambda s, n=n: s["send"] and "Step %d done" % (n + 1) in s["thread"], "reply %d" % (n + 1))
+            hold("long-thread")
+            send_from_the_window("Make an abstract piece")
+            wait_chat(lambda s: not s["send"], "the question turn working")
+            caller.http("POST", "/mock/agent/reply", {"content": "Where should it go?", "question": {
+                "text": "Where should it go?", "options": [{"label": "In DaVinci Resolve", "description": ""},
+                                                           {"label": "A new image on NOLGIA", "description": ""}]}})
+            shown = wait_chat(lambda s: "Option0" in s["visible"], "the answer buttons")
+            assert shown["option0"] == "In DaVinci Resolve", shown
+            hold("question")
+            in_window("from nolgia_resolve import panel\npanel.current._on_option(0)\nresult = True")
+            wait_chat(lambda s: not s["send"] and "Option0" not in s["visible"], "the answer sent")
+            assert caller.state()["agent_submits"][-1]["content"] == "In DaVinci Resolve"
+            caller.http("POST", "/mock/agent/reply", {"status": "failed", "error": "not enough credits",
+                                                      "error_code": "insufficient_credits"})
+            shown = wait_chat(lambda s: "ChatNotice" in s["visible"], "the out of credits notice")
+            assert "out of credits" in shown["notice"] and "out of credits" not in shown["thread"], shown
+            hold("out-of-credits")
+            in_window("from nolgia_resolve import panel\npanel.current.controller.set_setting('allow_agent', False)\n"
+                      "result = True")
+            shown = wait_chat(lambda s: s["action"] == "Allow NOLGIA Agent", "the Allow NOLGIA Agent blocker")
+            assert not shown["send"] and "ChatNotice" in shown["visible"], shown
+            hold("blocker")
+            in_window("from nolgia_resolve import panel\npanel.current.controller.fix_chat_blocker()\nresult = True")
+            wait_chat(lambda s: s["action"] != "Allow NOLGIA Agent", "the blocker gone")
+            subs = [s for s in caller.state()["agent_submits"]]
+            assert all("steering" not in s for s in subs), subs
+
+        checks.check("the NOLGIA Agent chat in the window", chat_in_the_window)
 
         png_id = caller.seed_asset("sunset-wall.png", "image/png", e2e.make_png())
 

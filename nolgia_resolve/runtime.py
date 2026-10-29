@@ -27,6 +27,7 @@ from . import paths
 from .core import DEFAULT_API_URL, PLUGIN_VERSION
 from .core.api import ApiClient, normalize_base_url
 from .core.auth import DeviceLogin, LoginCancelled, LoginError
+from .core.chat import AgentChat, ChatStore, Link
 from .core.commands import ActivityLog, CommandError
 from .core.instance import lease_instance_id
 from .core.mainthread import MainThreadExecutor
@@ -123,6 +124,7 @@ class Controller:
         self._last_alive = time.monotonic()
         self.on_approval = None  # set by the window: called with each new request
         self.resolve_gone = False
+        self.chat = AgentChat(self)
         global current
         current = self
 
@@ -181,6 +183,36 @@ class Controller:
         if self.env_token:
             return self.env_email
         return self.settings.get("account_email")
+
+    # ---------------------------------------------------------- chat
+
+    def chat_blocker(self):
+        """Why the chat cannot send right now, with the one click that fixes
+        it, or None. NOLGIA Agent reaches this Resolve only while it is
+        connected and Allow NOLGIA Agent is on."""
+        if not self.signed_in or self.login is not None:
+            return None
+        if not self.connected or self.lease is None:
+            return {"kind": "connect", "label": "Turn on Connected",
+                    "text": "Turn on Connected so NOLGIA Agent can work in this DaVinci Resolve."}
+        if not self.setting("allow_agent"):
+            return {"kind": "allow_agent", "label": "Allow NOLGIA Agent",
+                    "text": "NOLGIA Agent can work here only while Allow NOLGIA Agent is on."}
+        return None
+
+    def fix_chat_blocker(self):
+        blocker = self.chat_blocker()
+        if blocker is None:
+            return
+        if blocker["kind"] == "connect":
+            self.connect()
+        elif blocker["kind"] == "allow_agent":
+            self.set_setting("allow_agent", True)
+
+    def auth_failed(self, text):
+        """The chat's sign in was refused (401), from the chat's thread: as
+        the worker's, on the main thread."""
+        self.events.put(lambda: self._auth_failed(text))
 
     # ---------------------------------------------------------- status
 
@@ -262,6 +294,9 @@ class Controller:
         self.worker.start()
         if self.has_window:
             self.settings.update(connected=True)
+            # The NOLGIA Agent chat in the window, pinned to this install.
+            self.chat.begin(Link(api, self.lease.instance_id, api.base_url, self.account_email(),
+                                 ChatStore(os.path.join(self.config_dir, "chat.json"))))
         self.clean_exit = True
         if not self.account_email():
             self._fetch_email(api)
@@ -318,6 +353,7 @@ class Controller:
             self.env_token = None
         else:
             self.settings.update(token="", account_email="", token_expires_at=0.0)
+        self.chat.reset(forget=False)
         self.disconnect()
         self.message = text
 
@@ -386,6 +422,7 @@ class Controller:
         self.settings.update(token=token.access_token, token_api_url=base_url, account_email=token.email or "",
                              token_expires_at=float(token.expires_at or 0))
         self.log("Signed in%s." % (" as %s" % token.email if token.email else ""))
+        self.chat.reset(forget=False)
         self.connect()
 
     def sign_out(self):
@@ -393,6 +430,7 @@ class Controller:
         self.disconnect("You signed out of NOLGIA in DaVinci Resolve before this ran.")
         self.env_token = None
         self.settings.update(token="", token_api_url="", account_email="", token_expires_at=0.0, connected=False)
+        self.chat.reset()
         self.message = "Signed out."
         self.bump()
 
@@ -547,6 +585,7 @@ class Controller:
     def shutdown(self, wait=0.0):
         self.closing = True
         self.cancel_sign_in()
+        self.chat.close()
         worker = self.worker
         if worker is not None:
             self.executor.close("DaVinci Resolve's NOLGIA window closed.")
