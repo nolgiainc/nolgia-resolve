@@ -64,6 +64,28 @@ class PanelTest(unittest.TestCase):
     def status_of(self, command_id):
         return support.call(self.server, "GET", "/v1/bridge/commands/" + command_id)[1]
 
+    def test_a_window_made_too_short_gets_its_height_back(self):
+        # The owner's Mac test (2026-10-29): Resolve on macOS let the window be
+        # dragged shorter than its minimum, and the text box covered the chat.
+        self.win.Geometry = [120, 60, 440, 600]
+        for _ in range(panel_module.HEIGHT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual(self.win.resized, [[440, panel_module.MIN_HEIGHT]])
+        self.win.Geometry = {1.0: 120.0, 2.0: 60.0, 3.0: 400.0, 4.0: 500.0}   # a Lua table reads back as a dict
+        for _ in range(panel_module.HEIGHT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual(self.win.resized[-1], [panel_module.MIN_WIDTH, panel_module.MIN_HEIGHT])
+        tall = len(self.win.resized)
+        for _ in range(panel_module.HEIGHT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual(len(self.win.resized), tall, "a window at its minimum is left alone")
+
+    def test_no_height_check_where_the_window_cannot_say_its_size(self):
+        self.win.Geometry = None
+        for _ in range(panel_module.HEIGHT_CHECK_TICKS * 2):
+            self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual(self.win.resized, [])
+
     def test_layout_and_signed_out_state(self):
         self.assertEqual(self.win.props["WindowTitle"], "NOLGIA")
         for element_id in ("Status", "SignIn", "SignOut", "Connected", "AllowAgent", "AskBeforeRun", "Activity",

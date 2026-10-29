@@ -3,14 +3,102 @@
 """Small helpers with no Blender dependency."""
 
 import datetime
+import json
 import os
+import platform
 import random
 import re
+import subprocess
+import sys
 
 _ISO_RE = re.compile(
     r"^(\d{4})-(\d{2})-(\d{2})[Tt ](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?"
     r"(Z|z|[+-]\d{2}:?\d{2})?$"
 )
+
+
+def os_name(platform_name=None):
+    """The computer's operating system as NOLGIA names it: "macos",
+    "windows", "linux", or "" for anything else."""
+    name = sys.platform if platform_name is None else platform_name
+    if name == "darwin":
+        return "macos"
+    if name.startswith("win"):
+        return "windows"
+    if name.startswith("linux"):
+        return "linux"
+    return ""
+
+
+def computer_name(platform_name=None, scutil=None, node=None):
+    """The computer's own name, the one its owner knows it by.
+
+    On a Mac that is the Computer Name in System Settings > General > About
+    ("Louie's MacBook Pro"), read with scutil; the network name Python
+    reports there ("Louies-MacBook-Pro.local") is only the fallback, without
+    ".local". On Windows it is the computer name (DESKTOP-ABC123). Every
+    NOLGIA plugin reports the name this way, so NOLGIA Agent names one
+    computer one way (the owner's Mac test, 2026-10-29).
+    """
+    if (sys.platform if platform_name is None else platform_name) == "darwin":
+        name = (scutil or _scutil_computer_name)()
+        if name:
+            return name
+    name = (platform.node() if node is None else node).strip()
+    if name.lower().endswith(".local"):
+        name = name[: -len(".local")]
+    return name
+
+
+def _scutil_computer_name():
+    try:
+        out = subprocess.run(["/usr/sbin/scutil", "--get", "ComputerName"], capture_output=True, timeout=3)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return ""
+    if out.returncode != 0:
+        return ""
+    return out.stdout.decode("utf-8", "replace").strip()
+
+
+def nolgia_data_dir(platform_name=None, env=None, home=None):
+    """NOLGIA's per-user folder that every plugin shares: %APPDATA%\\NOLGIA on
+    Windows, ~/Library/Application Support/NOLGIA on macOS, ~/.config/NOLGIA
+    elsewhere."""
+    platform_name = sys.platform if platform_name is None else platform_name
+    env = os.environ if env is None else env
+    home = os.path.expanduser("~") if home is None else home
+    if platform_name.startswith("win"):
+        return os.path.join(env.get("APPDATA") or os.path.join(home, "AppData", "Roaming"), "NOLGIA")
+    if platform_name == "darwin":
+        return os.path.join(home, "Library", "Application Support", "NOLGIA")
+    return os.path.join(env.get("XDG_CONFIG_HOME") or os.path.join(home, ".config"), "NOLGIA")
+
+
+def remember_computer_name(name, writer, folder=None):
+    """Keep the computer's name in <NOLGIA data>/computer.json, for NOLGIA for
+    Photoshop: its sandbox cannot ask Windows for the computer's name, so it
+    reads the one the other NOLGIA plugins found. Best effort: returns
+    False when the file could not be written."""
+    if not name:
+        return False
+    folder = nolgia_data_dir() if folder is None else folder
+    path = os.path.join(folder, "computer.json")
+    data = {"name": name, "os": os_name(), "written_by": writer}
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            if json.load(handle) == data:
+                return True
+    except (OSError, ValueError):
+        pass
+    try:
+        os.makedirs(folder, exist_ok=True)
+        tmp = "%s.%d.tmp" % (path, os.getpid())
+        with open(tmp, "w", encoding="utf-8") as handle:
+            json.dump(data, handle)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
 
 
 def parse_time(value):

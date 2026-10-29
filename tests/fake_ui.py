@@ -130,10 +130,18 @@ class Window:
         self.On = Handlers()
         self.shown = False
         self.relayouts = 0
+        self.resized = []
+        self.Geometry = list(props.get("Geometry") or [0, 0, 440, 860])
         self.items = {e.props["ID"]: e for e in layout.walk() if "ID" in e.props}
 
     def RecalcLayout(self):
         self.relayouts += 1
+
+    def Resize(self, size):
+        self.resized.append(list(size))
+        geometry = list(self.Geometry)
+        geometry[2], geometry[3] = size
+        self.Geometry = geometry
 
     def GetItems(self):
         return dict(self.items)
