@@ -259,18 +259,36 @@ the project since it was last saved.
   (Resolve Studio 21.1.1 on Windows 11; the same on the owner's Mac). Only a
   script's own `resolve.Quit()` finishes it. So the NOLGIA window finishes
   the quit itself, but only on Resolve's own quit sequence: a Close less than
-  1.5 seconds after the project changed to one the window had not seen,
-  named "Untitled Project", with no timelines, no clips and no bins, not
-  saved in the project library, and (on Windows, where it can be read) with
-  none of Resolve's own windows left on screen. Opening any other project
-  and closing the NOLGIA window never quits Resolve, and neither does
-  anything the window cannot read. On macOS one case still looks the same:
-  New Project (an empty, unsaved "Untitled Project") and closing the NOLGIA
-  window within 1.5 seconds. On Windows Resolve's main window rules that
-  out. If Resolve's interface is in another language its new project has
-  another name, and a quit then stays as it was before 0.2.3.
+  0.5 seconds after the window first saw the project change (it reads the
+  project on every tick) to one it had not seen, named "Untitled Project",
+  with no timelines, no clips and no bins, not saved in the project library,
+  and (on Windows, where it can be read) with none of Resolve's own windows
+  left on screen. In Resolve 21.1.1 on Windows 11 that gap was 0.02 to 0.03
+  seconds; the window logs it on every quit it finishes, and logs a later
+  Close too, so a missed quit shows why. Opening any other project and
+  closing the NOLGIA window never quits Resolve, and neither does anything
+  the window cannot read. On macOS one case still quits Resolve by mistake:
+  New Project (an empty, unsaved "Untitled Project") and the NOLGIA window
+  closed less than 0.5 seconds after the new project opens, for example a
+  click on its close button while Resolve is still busy making the project.
+  On Windows Resolve's main window rules that out. If Resolve's interface is
+  in another language its new project has another name, and a quit then
+  stays as it was before 0.2.3.
 
 ## Tested on
+
+0.2.5 (October 29, 2026): the NOLGIA window finishes Resolve's quit only
+when it closes less than 0.5 s after Resolve's new Untitled Project opens
+(1.5 s in 0.2.4), reads the project on every tick, and logs the gap. Checked
+in Resolve Studio 21.1.1 on Windows 11, deciding as on Windows and as on
+macOS: quitting Resolve with the NOLGIA window open quit it both ways (gap
+0.031 and 0.032 s); a new "Untitled Project" made by a script and the window
+closed 0.61 s later left Resolve open (the log gives 0.610 s), closed at once
+it quit Resolve deciding as on macOS (0.016 s) and left it open on Windows;
+opening a saved project and closing the window at once, or closing only the
+NOLGIA window, left it open. While Resolve saves the project on a quit the
+window's ticks stop for about 1.6 s. Unit tests and the in-app test (12/12).
+On macOS it waits for its re-test.
 
 0.2.4 (October 29, 2026): the NOLGIA window finishes Resolve's quit only on
 Resolve's own quit sequence (see Known limits); in 0.2.3 on macOS, closing
