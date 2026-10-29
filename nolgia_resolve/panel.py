@@ -70,8 +70,9 @@ HEIGHT_CHECK_TICKS = 1
 # Resolve by mistake is worse than that, so a Close counts as Resolve quitting
 # only when all of these hold, and then, once the window is closed, NOLGIA
 # finishes the quit with resolve.Quit():
-# - the current project changed less than QUIT_SWITCH_SECONDS ago (the window
-#   reads it when it opens and every PROJECT_CHECK_TICKS ticks),
+# - the window first saw the current project change less than
+#   QUIT_SWITCH_SECONDS ago (it reads the project when it opens and every
+#   PROJECT_CHECK_TICKS ticks),
 # - to a project this window has not seen before,
 # - named UNTITLED_PROJECT, with no timelines, no clips and no bins,
 # - not saved in the project library (the one Resolve opens while quitting
@@ -79,11 +80,22 @@ HEIGHT_CHECK_TICKS = 1
 # - and, where that can be read (Windows), none of Resolve's own windows is
 #   left on screen.
 # Anything that cannot be read counts against quitting. On macOS a new
-# project made with New Project and closed straight away still looks like
-# that (it is not in the library until it is saved), so only a NOLGIA window
-# closed within QUIT_SWITCH_SECONDS of making one would quit Resolve there.
-PROJECT_CHECK_TICKS = 5
-QUIT_SWITCH_SECONDS = 1.5
+# project made with New Project still looks like that (it is not in the
+# library until it is saved), so a NOLGIA window closed within
+# QUIT_SWITCH_SECONDS of one opening would quit Resolve there.
+#
+# In Resolve Studio 21.1.1 on Windows 11 the window first saw Resolve's new
+# Untitled Project 0.02 to 0.03 s before Resolve closed it. The window allows
+# 0.5 s: a quit it misses only leaves Resolve open as before 0.2.3, a wrong
+# quit is worse. The project is read on every tick (about 3 ms), so a change
+# is seen within a tick of Resolve showing it. (While Resolve saves the
+# project on a quit its ticks stop for about 1.6 s, so the last read of the
+# old project tells nothing.)
+PROJECT_CHECK_TICKS = 1
+QUIT_SWITCH_SECONDS = 0.5
+# A Close later than QUIT_SWITCH_SECONDS but within this many seconds of such
+# a project opening logs the gap, so a quit the window missed shows why.
+QUIT_NOTE_SECONDS = 10.0
 UNTITLED_PROJECT = "Untitled Project"
 STATUS_LINES_PX = 40
 FOOTER_LINES_PX = 36
@@ -154,6 +166,7 @@ class Panel:
         self._closed = False
         self._ticks = 0
         self._height_check_off = False
+        self._pm = None
         self._project_seen = None
         self._projects_seen = set()
         self._project_changed_at = None
@@ -407,7 +420,7 @@ class Panel:
         self._closed = True
         self._finish_quit = ev is not None and self._resolve_is_quitting()
         if self._finish_quit:
-            self.log("DaVinci Resolve is quitting (its new Untitled Project opened %.2f s before the window "
+            self.log("DaVinci Resolve is quitting (its new Untitled Project opened %.3f s before the window "
                      "closed); switching off." % (time.monotonic() - self._project_changed_at))
         else:
             self.log("The NOLGIA window closed; switching off.")
@@ -425,7 +438,9 @@ class Panel:
         it changed to one this window had not seen (a moment with no project
         open does not count)."""
         try:
-            project = self.resolve.GetProjectManager().GetCurrentProject()
+            if self._pm is None:
+                self._pm = self.resolve.GetProjectManager()
+            project = self._pm.GetCurrentProject()
             seen = project.GetUniqueId() if project is not None else None
         except Exception:
             return
@@ -443,7 +458,13 @@ class Panel:
         not the person closing the NOLGIA window."""
         self._note_project()
         changed = self._project_changed_at
-        if changed is None or time.monotonic() - changed > QUIT_SWITCH_SECONDS:
+        if changed is None:
+            return False
+        since = time.monotonic() - changed
+        if since > QUIT_SWITCH_SECONDS:
+            if since <= QUIT_NOTE_SECONDS and self._project_is_new and self._is_quit_project():
+                self.log("The NOLGIA window closed %.3f s after a new empty Untitled Project opened, later than "
+                         "Resolve's quit closes it (%.1f s); DaVinci Resolve stays open." % (since, QUIT_SWITCH_SECONDS))
             return False
         if not (self._project_is_new and self._is_quit_project()):
             self.log("The project changed just before the NOLGIA window closed, but not to the new empty "

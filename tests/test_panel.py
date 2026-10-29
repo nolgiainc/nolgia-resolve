@@ -355,6 +355,25 @@ class PanelTest(unittest.TestCase):
             self._resolve_quits(resolve)
         self.assertTrue(self.panel._finish_quit)
 
+    def test_a_new_untitled_project_then_a_close_after_0_6_s_never_quits_resolve(self):
+        # Resolve closes script windows 0.02 to 0.03 s after its new Untitled
+        # Project opens; 0.6 s later is a person, never Resolve's quit.
+        resolve = self._fake_resolve()
+        resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
+        self.disp.tick(panel_module.TIMER_ID)
+        time.sleep(0.6)
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+        self.assertTrue(any(line.startswith("The NOLGIA window closed 0.6") and "DaVinci Resolve stays open" in line
+                            for line in self.lines), self.lines)
+
+    def test_the_quit_window_is_half_a_second_and_the_project_is_read_every_tick(self):
+        self.assertEqual(panel_module.QUIT_SWITCH_SECONDS, 0.5)
+        resolve = self._fake_resolve()
+        resolve.manager.project = resolve.Project("project-b", "Ad spot")
+        self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual(self.panel._project_seen, "project-b")
+
     def test_closing_the_window_never_quits_resolve(self):
         resolve = self._fake_resolve()
         self.win.fire(panel_module.WINDOW_ID, "Close")
