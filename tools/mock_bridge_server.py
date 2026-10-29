@@ -157,6 +157,9 @@ class MockState:
     def __init__(self, tokens=("test-token",), device_interval=5, auto_approve_after=None,
                  poll_wait_seconds=MAX_WAIT, rate_limit=RATE_LIMIT):
         self.cond = threading.Condition()
+        # False plays an API from before sessions carried the OS (migration
+        # 000233): an os field is then an unknown field.
+        self.bridge_os = True
         self.device_interval = device_interval
         self.auto_approve_after = auto_approve_after
         self.poll_wait_seconds = poll_wait_seconds
@@ -237,12 +240,15 @@ class MockState:
     @staticmethod
     def session_view(s):
         document = {k: s["document"][k] for k in ("name", "path") if k in s["document"]}
-        return {
+        view = {
             "id": s["id"], "instance_id": s["instance_id"], "app": s["app"], "app_version": s["app_version"],
             "plugin_version": s["plugin_version"], "machine_name": s["machine_name"], "document": document,
             "capabilities": list(s["capabilities"]), "allow_agent": s["allow_agent"],
             "created_at": rfc3339(s["created_at"]), "last_seen_at": rfc3339(s["last_seen_at"]),
         }
+        if s.get("os"):
+            view["os"] = s["os"]
+        return view
 
     @staticmethod
     def command_view(c):
@@ -581,11 +587,15 @@ def mock_deny(h):
 @route("POST", r"/v1/bridge/sessions")
 def register_session(h):
     user = h.user()
-    body = strict_json(h.raw_body, ("instance_id", "app", "app_version", "plugin_version", "machine_name",
-                                    "document", "capabilities", "allow_agent"),
+    fields_allowed = ("instance_id", "app", "app_version", "plugin_version", "machine_name",
+                      "document", "capabilities", "allow_agent") + (("os",) if h.state.bridge_os else ())
+    body = strict_json(h.raw_body, fields_allowed,
                        required=("instance_id", "app"), cap=REGISTER_MAX_BYTES,
                        types={"instance_id": str, "app": str, "app_version": str, "plugin_version": str,
-                              "machine_name": str, "document": dict, "capabilities": list, "allow_agent": bool})
+                              "machine_name": str, "os": str, "document": dict, "capabilities": list,
+                              "allow_agent": bool})
+    if body.get("os") is not None and body["os"] not in ("macos", "windows", "linux"):
+        raise bad_request("os must be one of macos, windows, linux")
     instance_id = (body["instance_id"] or "").strip()
     if not instance_id:
         raise bad_request("instance_id is required")
@@ -636,7 +646,7 @@ def register_session(h):
                  "created_at": at, "last_seen_at": at}
             st.sessions[s["id"]] = s
         s.update(app=body["app"], document=document, capabilities=capabilities, allow_agent=allow_agent,
-                 disconnected_at=None, last_seen_at=max(s["last_seen_at"], at), **fields)
+                 os=body.get("os") or "", disconnected_at=None, last_seen_at=max(s["last_seen_at"], at), **fields)
         st.heartbeats.append({"session_id": s["id"], "at": at, "body": body})
         view = st.session_view(s)
         view["poll_wait_seconds"] = st.poll_wait_seconds

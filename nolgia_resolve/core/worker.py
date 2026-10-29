@@ -14,15 +14,14 @@ Allow NOLGIA Agent) comes from `snapshot()`, a plain dict the main thread
 keeps up to date.
 """
 
-import platform
 import threading
 import time
 import traceback
 
-from . import APP, PLUGIN_VERSION
+from . import APP, DEVICE_CLIENT_ID, PLUGIN_VERSION
 from .api import ApiError, NetworkError, Unauthorized
 from .commands import CAPABILITIES, Command, CommandError, result_body, validate
-from .util import Backoff
+from .util import Backoff, computer_name, os_name, remember_computer_name
 
 
 # The API's limits on POST /bridge/sessions fields (characters).
@@ -65,7 +64,13 @@ class BridgeWorker:
         self.on_auth_failed = on_auth_failed or (lambda message: None)
         self.log = log or (lambda message: None)
         self.heartbeat_interval = heartbeat_interval
-        self.machine_name = machine_name if machine_name is not None else platform.node()
+        # A name looked up here is kept for NOLGIA for Photoshop (start()).
+        self._remember_name = machine_name is None
+        self.machine_name = machine_name if machine_name is not None else computer_name()
+        self.os = os_name()
+        # An API from before sessions carried the OS refuses the field; then
+        # the plugin stops sending it rather than stop connecting.
+        self._send_os = bool(self.os)
 
         self.session_id = None
         self.poll_wait = 25
@@ -88,6 +93,8 @@ class BridgeWorker:
 
     def start(self):
         self._set_status(Status.CONNECTING, "Connecting to NOLGIA...")
+        if self._remember_name:
+            remember_computer_name(self.machine_name, DEVICE_CLIENT_ID + " " + PLUGIN_VERSION)
         for name, target in (("heartbeat", self._heartbeat_loop), ("poll", self._poll_loop)):
             thread = threading.Thread(target=target, name="nolgia-" + name, daemon=True)
             self._threads.append(thread)
@@ -147,7 +154,7 @@ class BridgeWorker:
         path = doc.get("path")
         if path and len(path) <= MAX_DOCUMENT_PATH:
             document["path"] = path
-        return {
+        body = {
             "instance_id": self.instance_id,
             "app": APP,
             "app_version": _one_line(snap.get("app_version"), MAX_VERSION),
@@ -157,6 +164,9 @@ class BridgeWorker:
             "capabilities": list(CAPABILITIES),
             "allow_agent": bool(snap.get("allow_agent", True)),
         }
+        if self._send_os:
+            body["os"] = self.os
+        return body
 
     def _auth_failed(self, err):
         with self._lock:
@@ -191,6 +201,9 @@ class BridgeWorker:
                     self._auth_failed(err)
                     break
                 except (ApiError, NetworkError) as err:
+                    if self._send_os and isinstance(err, ApiError) and err.status == 400 and '"os"' in err.detail:
+                        self._send_os = False
+                        continue
                     delay = getattr(err, "retry_after", None) or backoff.next()
                     self._set_status(Status.RETRYING, self._retry_text(err, delay))
                     self.log(self.status_text)

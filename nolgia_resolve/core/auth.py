@@ -16,8 +16,9 @@ person to sign in again.
 
 import threading
 import time
+import urllib.parse
 
-from . import DEVICE_CLIENT_ID, DEVICE_SCOPE
+from . import APP, DEVICE_CLIENT_ID, DEVICE_SCOPE
 from .api import ApiError, NetworkError
 
 
@@ -40,7 +41,15 @@ class DevicePrompt:
 
     @property
     def open_url(self):
-        return self.verification_uri_complete or self.verification_uri
+        """The approval page, naming this app (client=), so the page says
+        which NOLGIA plugin is signing in instead of the CLI's words."""
+        url = self.verification_uri_complete or self.verification_uri
+        parts = urllib.parse.urlsplit(url)
+        query = urllib.parse.parse_qsl(parts.query, keep_blank_values=True)
+        if any(key == "client" for key, _ in query):
+            return url
+        query.append(("client", APP))
+        return urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
 
 
 class Token:

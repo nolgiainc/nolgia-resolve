@@ -17,10 +17,10 @@ on, and it lists every command it runs.
 
 A script plugin for DaVinci Resolve Studio 21.1 and newer (since 21.1 Resolve
 runs Python scripts only in the Studio edition). It needs Python 3.8 or
-newer and nothing outside Python's standard library. Versions up to 0.1.1
-were tested on Windows and macOS; 0.2.x (the NOLGIA Agent chat) has been run
-on Windows only so far. It is written for Linux too, but has not been run
-there yet (see [Tested on](#tested-on)).
+newer and nothing outside Python's standard library. It is tested on
+Windows and macOS (0.2.1 on macOS 26.6.2 with Resolve Studio 21.1.1). It is
+written for Linux too, but has not been run there yet (see
+[Tested on](#tested-on)).
 
 Which Python runs it: Resolve runs a Scripts menu script in its own
 `fuscript` program with a Python it finds on the computer. On Windows,
@@ -247,6 +247,20 @@ the project since it was last saved.
 
 ## Tested on
 
+0.2.2 (October 29, 2026), from the owner's Mac test of 0.2.1: on macOS
+Resolve let the window be dragged shorter than its minimum height, and below
+about 650 pt the text box sat over the chat, so the window now puts its
+height back to the minimum; the plugin reports the computer's own name (on a
+Mac the one in System Settings > General > About) and its operating system,
+and the sign in page names DaVinci Resolve. Unit tests on Windows; on macOS
+it waits for its re-test.
+
+0.2.1 on macOS 26.6.2 (Apple silicon) with DaVinci Resolve Studio 21.1.1, on
+October 29, 2026: installed over 0.1.1 with install.sh, signed in, connected,
+and a live NOLGIA Agent turn from the window's chat (it added the newest
+NOLGIA clip to the timeline, 70 credits); Enter sends, the thread and
+Activity scroll, Open this chat on nolgia.ai opens the browser.
+
 0.2.1 (October 29, 2026): the chat says "Answer with a button below" only
 when the Agent's question offers answers (a live turn on 0.2.0 ended with an
 open question and the hint showed with no buttons under it). Unit tests.
@@ -257,8 +271,7 @@ against the mock API, which now also drives the chat in the window (its
 first look, a turn working and its reply, a long thread, a question's answer
 buttons, out of credits, Allow NOLGIA Agent off); and live NOLGIA Agent
 turns against the real API, sent from the window's chat (one on the released
-0.2.0: the Agent added a library clip to a new timeline, 70 credits). Not yet
-run on macOS: until it is, 0.2.x is tested on Windows only.
+0.2.0: the Agent added a library clip to a new timeline, 70 credits).
 
 Earlier versions:
 

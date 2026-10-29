@@ -49,6 +49,11 @@ MIN_WIDTH = 420
 # laptop screen.
 MIN_HEIGHT = 780
 DEFAULT_HEIGHT = 860
+# Resolve on macOS lets the window be dragged shorter than its MinimumSize
+# (the owner's Mac test, 2026-10-29: below about 650 pt the text box sat over
+# the chat). The window cannot scroll as a whole, so every so many ticks the
+# height is read and, when it is under MIN_HEIGHT, put back.
+HEIGHT_CHECK_TICKS = 10
 STATUS_LINES_PX = 40
 FOOTER_LINES_PX = 36
 COST_LINES_PX = 54
@@ -63,6 +68,27 @@ OPTIONS = 4
 
 # The open window, for nolgia_resolve.close_window().
 current = None
+
+
+def _window_size(geometry):
+    """(width, height) from a UIManager Geometry, which reads back as a list
+    [x, y, width, height] or as the Lua table's dict {1: x, 2: y, 3: width,
+    4: height}; None when it is neither."""
+    try:
+        if isinstance(geometry, dict):
+            width, height = geometry.get(3, geometry.get(3.0)), geometry.get(4, geometry.get(4.0))
+        else:
+            width, height = geometry[2], geometry[3]
+        return float(width), float(height)
+    except (TypeError, ValueError, IndexError, KeyError):
+        return None
+
+
+def _window_origin(geometry):
+    """(x, y) from a Geometry read like _window_size's."""
+    if isinstance(geometry, dict):
+        return float(geometry.get(1, geometry.get(1.0))), float(geometry.get(2, geometry.get(2.0)))
+    return float(geometry[0]), float(geometry[1])
 
 
 def find_open_window(fusion):
@@ -98,6 +124,7 @@ class Panel:
         self._box_quiet = False
         self._closed = False
         self._ticks = 0
+        self._height_check_off = False
         global current
         current = self
 
@@ -247,6 +274,8 @@ class Panel:
         self._ticks += 1
         if self._ticks == 1:
             self.log("The NOLGIA window is running (timer ticks).")
+        if self._ticks % HEIGHT_CHECK_TICKS == 0:
+            self._keep_min_height()
         ctl = self.controller
         ctl.tick()
         if self._scroll_to:
@@ -549,6 +578,35 @@ class Panel:
         self._scroll_ticks -= 1
         if self._scroll_ticks <= 0:
             self._scroll_to = None
+
+    def _keep_min_height(self):
+        """Put the window back to MIN_HEIGHT when it was made shorter (see
+        HEIGHT_CHECK_TICKS). Windows keeps the minimum itself, so this does
+        nothing there; a UIManager that cannot tell the window's size or
+        resize it turns the check off."""
+        if self._height_check_off:
+            return
+        try:
+            geometry = None
+            try:
+                geometry = self.win.GetGeometry()
+            except Exception:
+                pass
+            if _window_size(geometry) is None:
+                geometry = self.win.Geometry
+            size = _window_size(geometry)
+            if size is None or size[1] >= MIN_HEIGHT:
+                return
+            width = max(size[0], MIN_WIDTH)
+            try:
+                self.win.Resize([width, MIN_HEIGHT])
+            except Exception:
+                x, y = _window_origin(geometry)
+                self.win.Geometry = [x, y, width, MIN_HEIGHT]
+        except Exception:
+            self._height_check_off = True
+            return
+        self._relayout()
 
     def _relayout(self):
         """UIManager lays a window out when it is shown. After that an element
