@@ -24,10 +24,10 @@ import webbrowser
 
 from . import ops as ops_module
 from . import paths
-from .chat import AgentChat
 from .core import DEFAULT_API_URL, PLUGIN_VERSION
 from .core.api import ApiClient, normalize_base_url
 from .core.auth import DeviceLogin, LoginCancelled, LoginError
+from .core.chat import AgentChat, ChatStore, Link
 from .core.commands import ActivityLog, CommandError
 from .core.instance import lease_instance_id
 from .core.mainthread import MainThreadExecutor
@@ -186,15 +186,6 @@ class Controller:
 
     # ---------------------------------------------------------- chat
 
-    def chat_api(self):
-        """The API client for the window's chat: the connected one, while
-        signed in."""
-        return self.api if self.api is not None and self.signed_in else None
-
-    def instance_id(self):
-        """This install's instance id while connected (the chat's pin)."""
-        return self.lease.instance_id if self.lease is not None else None
-
     def chat_blocker(self):
         """Why the chat cannot send right now, with the one click that fixes
         it, or None. NOLGIA Agent reaches this Resolve only while it is
@@ -218,9 +209,10 @@ class Controller:
         elif blocker["kind"] == "allow_agent":
             self.set_setting("allow_agent", True)
 
-    def chat_auth_failed(self, text):
-        """The chat's sign in was refused (401): as the worker's."""
-        self._auth_failed(text)
+    def auth_failed(self, text):
+        """The chat's sign in was refused (401), from the chat's thread: as
+        the worker's, on the main thread."""
+        self.events.put(lambda: self._auth_failed(text))
 
     # ---------------------------------------------------------- status
 
@@ -302,7 +294,9 @@ class Controller:
         self.worker.start()
         if self.has_window:
             self.settings.update(connected=True)
-            self.chat.start()
+            # The NOLGIA Agent chat in the window, pinned to this install.
+            self.chat.begin(Link(api, self.lease.instance_id, api.base_url, self.account_email(),
+                                 ChatStore(os.path.join(self.config_dir, "chat.json"))))
         self.clean_exit = True
         if not self.account_email():
             self._fetch_email(api)
@@ -542,8 +536,6 @@ class Controller:
                 self.log("A NOLGIA task failed:\n" + traceback.format_exc())
         if self.executor.pump():
             self.bump()
-        if self.has_window:
-            self.chat.tick()
         if self.worker is not None:
             if time.monotonic() - self._last_snapshot > 1.0:
                 self.update_snapshot()
@@ -593,6 +585,7 @@ class Controller:
     def shutdown(self, wait=0.0):
         self.closing = True
         self.cancel_sign_in()
+        self.chat.close()
         worker = self.worker
         if worker is not None:
             self.executor.close("DaVinci Resolve's NOLGIA window closed.")

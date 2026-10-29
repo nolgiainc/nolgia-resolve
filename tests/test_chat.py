@@ -13,10 +13,24 @@ import support
 import fake_resolve as fake
 import fake_ui
 
-from nolgia_resolve import chat as chat_module
+import json
+import os
+
+from nolgia_resolve import chatview
 from nolgia_resolve import panel as panel_module
+from nolgia_resolve.core import COST_LINE
+from nolgia_resolve.core import chat as core_chat
 from nolgia_resolve.runtime import Controller
 from nolgia_resolve.settings import Settings
+
+
+def remembered(folder):
+    """What the chat remembers (core/chat.py's ChatStore, chat.json)."""
+    try:
+        with open(os.path.join(folder, "chat.json"), encoding="utf-8") as handle:
+            return json.load(handle)
+    except OSError:
+        return None
 
 
 def mock(server, path, body):
@@ -90,7 +104,7 @@ class ChatWindowTest(unittest.TestCase):
         self.assertGreaterEqual(self.item("Thread").props["MinimumSize"][1], 100)
         self.assertEqual(self.item("Activity").props["MaximumSize"][1], panel_module.ACTIVITY_MAX_PX)
         # Button text sets a minimum width: no example label may widen the window.
-        for short, full in chat_module.EXAMPLES:
+        for short, full in chatview.EXAMPLES:
             self.assertLessEqual(len(short), panel_module.EXAMPLE_CHARS, short)
             self.assertTrue(full.endswith("."), full)
 
@@ -105,10 +119,10 @@ class ChatWindowTest(unittest.TestCase):
             self.assertFalse(self.visible(element_id), element_id)
         cost = self.item("ChatCost").Text
         self.assertEqual(cost, "NOLGIA Agent works right here, each turn from 70 credits on your model. "
-                               "You can also use Claude Code, Cursor, Codex or another agent with NOLGIA connected.")
+                               "You can also use Claude, Cursor, Codex or another agent with NOLGIA connected.")
         self.assertNotIn("free", cost.lower())
         self.win.fire("Example0")
-        self.assertEqual(self.item("Box").PlainText, chat_module.EXAMPLES[0][1])
+        self.assertEqual(self.item("Box").PlainText, chatview.EXAMPLES[0][1])
         # Before the first message, "Open on nolgia.ai" opens NOLGIA Agent there.
         self.win.fire("OpenWeb")
         self.assertEqual(self.opened[-1], "https://nolgia.ai/agent")
@@ -116,8 +130,8 @@ class ChatWindowTest(unittest.TestCase):
     def test_cost_line_without_a_rate_reads_the_lowest_one(self):
         mock(self.server, "/mock/agent", {"models_error": True})
         self.sign_in()
-        self.assertEqual(self.item("ChatCost").Text, chat_module.COST_LINE)
-        self.assertIn("each turn from 10 credits.", chat_module.COST_LINE)
+        self.assertEqual(self.item("ChatCost").Text, COST_LINE)
+        self.assertIn("each turn from 10 credits", COST_LINE)
 
     def test_send_pins_a_new_chat_to_this_resolve_and_draws_the_reply(self):
         self.sign_in()
@@ -139,8 +153,7 @@ class ChatWindowTest(unittest.TestCase):
         self.assertTrue(self.visible("Thread"))
         self.assertIn("Add my newest NOLGIA clip", self.thread())
         self.assertEqual(self.item("Thread").scrolls[-1], ("anchor", "end"), "a new message is shown from the end")
-        self.assertEqual(Settings(self.tmp)["chat_session_id"], session["id"])
-        self.assertEqual(Settings(self.tmp)["chat_instance_id"], "resolve-unit-1")
+        self.assertEqual(remembered(self.tmp)["id"], session["id"])
         # A second message while the first runs: nothing is sent.
         self.type_and_send("And another thing")
         time.sleep(0.3)
@@ -156,7 +169,7 @@ class ChatWindowTest(unittest.TestCase):
         self.assertIn('<a href="https://nolgia.ai/agent">https://nolgia.ai/agent</a>', html)
         self.assertIn("&lt;b&gt;this&lt;/b&gt;", html, "reply text is escaped, never drawn as HTML")
         self.assertIn("10 credits", html)
-        self.assertEqual(self.item("Thread").scrolls[-1], ("anchor", chat_module.anchor(reply["id"])),
+        self.assertEqual(self.item("Thread").scrolls[-1], ("anchor", chatview.anchor(reply["id"])),
                          "a finished reply is shown from its start")
         self.assertTrue(self.item("Send").Enabled)
         self.assertFalse(self.visible("Stop"))
@@ -172,7 +185,7 @@ class ChatWindowTest(unittest.TestCase):
         mock(self.server, "/mock/agent/reply", {"content": "Done."})
         self.tick_until(lambda: not self.controller.chat.busy and "Done." in self.thread())
         self.win.fire("NewChat")
-        self.assertEqual(Settings(self.tmp)["chat_session_id"], "")
+        self.assertIsNone(remembered(self.tmp))
         self.tick_until(lambda: self.visible("ChatIntro"))
         self.type_and_send("Start over")
         self.tick_until(lambda: len(self.state()["agent_creates"]) == 2)
@@ -247,7 +260,7 @@ class ChatWindowTest(unittest.TestCase):
         self.assertIn("Your NOLGIA Agent is not set up yet", self.item("ChatNotice").Text)
         self.assertEqual(self.item("ChatAction").Text, "Open NOLGIA Agent")
         self.assertEqual(self.state()["agent_creates"], [], "no chat is started without an agent")
-        self.assertEqual(self.item("Box").PlainText, "Hello", "the message stays in the box")
+        self.tick_until(lambda: self.item("Box").PlainText == "Hello")  # the message comes back to the box
 
     def test_never_chats_unpinned(self):
         # An API that does not know `app` yet refuses it: nothing is sent or kept.
@@ -258,8 +271,9 @@ class ChatWindowTest(unittest.TestCase):
         st = self.state()
         self.assertEqual(st["agent_submits"], [])
         self.assertEqual(st["agent_sessions"], [])
-        self.assertEqual(Settings(self.tmp)["chat_session_id"], "")
+        self.assertIsNone(remembered(self.tmp))
         self.assertIn("unknown field", self.item("ChatNotice").Text)
+        self.tick_until(lambda: self.item("Box").PlainText == "Hello")
 
     def test_blockers_and_their_fixes(self):
         self.sign_in()
@@ -285,7 +299,7 @@ class ChatWindowTest(unittest.TestCase):
         self.tick_until(lambda: self.state()["agent_submits"])
         mock(self.server, "/mock/agent/reply", {"content": "First reply"})
         self.tick_until(lambda: "First reply" in self.thread())
-        session_id = Settings(self.tmp)["chat_session_id"]
+        session_id = remembered(self.tmp)["id"]
         self.controller.shutdown(wait=5)
 
         # The same install opens the window again: the chat comes back.
@@ -320,51 +334,54 @@ class ChatWindowTest(unittest.TestCase):
     def test_sign_out_forgets_the_chat(self):
         self.sign_in()
         self.type_and_send("First")
-        self.tick_until(lambda: Settings(self.tmp)["chat_session_id"])
+        self.tick_until(lambda: remembered(self.tmp))
         self.win.fire("SignOut")
         self.tick_until(lambda: self.controller.worker is None)
-        self.assertEqual(Settings(self.tmp)["chat_session_id"], "")
+        self.assertIsNone(remembered(self.tmp))
         self.assertFalse(self.visible("Box"))
         self.assertIsNone(self.controller.chat.session_id)
 
 
-class ChatTextTest(unittest.TestCase):
-    def test_format_reply(self):
-        blocks = chat_module.format_reply("# Done\nI **added** `two` *clips* now.\n\n1. one\n- two\n```\ncode\n```\n---\nend")
-        self.assertEqual(blocks[0], {"type": "p", "parts": [{"text": "Done", "bold": True}]})
-        self.assertEqual(blocks[1]["parts"], [{"text": "I "}, {"text": "added", "bold": True}, {"text": " two clips now."}])
-        self.assertEqual([b["type"] for b in blocks[2:4]], ["li", "li"])
-        self.assertEqual(blocks[-1]["parts"], [{"text": "end"}])
+class ChatViewTest(unittest.TestCase):
+    def view(self, rows, hidden=0):
+        return {"hidden": hidden, "rows": rows}
 
-    def test_links(self):
-        parts = chat_module.inline_parts("See [your chat](https://nolgia.ai/agent/x) or https://nolgia.ai/billing.")
-        self.assertEqual(parts[1], {"text": "your chat", "href": "https://nolgia.ai/agent/x"})
-        self.assertEqual(parts[3], {"text": "https://nolgia.ai/billing", "href": "https://nolgia.ai/billing"})
-        self.assertEqual(chat_module.inline_parts("http://plain.example")[0], {"text": "http://plain.example"})
+    def row(self, id_, role, status="complete", text="", **extra):
+        out = {"id": id_, "role": role, "status": status, "background": False, "queued": False, "text": text,
+               "blocks": core_chat.format_reply(text) if role == "agent" and status == "complete" else None,
+               "failure": None, "question": None, "credits": None}
+        out.update(extra)
+        return out
 
-    def test_session_name_and_time_order(self):
-        self.assertEqual(chat_module.session_name("  Add   my newest clip to the end of it"),
-                         "DaVinci Resolve: Add my newest clip to the")
-        self.assertLessEqual(len(chat_module.session_name("x" * 200)), 80)
-        self.assertLess(chat_module.time_key("2026-10-29T01:00:01Z"), chat_module.time_key("2026-10-29T01:00:01.5Z"))
-        self.assertLess(chat_module.time_key("2026-10-29T01:00:01.999999Z"), chat_module.time_key("2026-10-29T01:00:02Z"))
+    def test_thread_html_escapes_and_marks(self):
+        view = self.view([self.row("u-1", "user", text="<b>hi</b>\nthere"),
+                          self.row("a-1", "agent", text="**Done**: see https://nolgia.ai/agent", credits=70),
+                          self.row("a-2", "agent", status="pending")], hidden=2)
+        html = chatview.thread_html(view)
+        self.assertIn("Earlier messages are on nolgia.ai.", html)
+        self.assertIn("&lt;b&gt;hi&lt;/b&gt;<br>there", html)
+        self.assertIn('<a name="mu1"></a>', html)
+        self.assertIn("<b>Done</b>", html)
+        self.assertIn('<a href="https://nolgia.ai/agent">https://nolgia.ai/agent</a>', html)
+        self.assertIn("70 credits", html)
+        self.assertNotIn("ma2", html, "a reply being worked on is not drawn")
+        self.assertTrue(html.endswith('<p><a name="end"></a>&nbsp;</p>'))
 
-    def test_turn_rate(self):
-        models = [{"model": "a", "turn_credits": 10, "default": True}, {"model": "b", "turn_credits": 70}]
-        self.assertEqual(chat_module.turn_rate({"model": None}, models), 10)
-        self.assertEqual(chat_module.turn_rate({"model": "b"}, models), 70)
-        self.assertIsNone(chat_module.turn_rate(None, models))
-        self.assertIsNone(chat_module.turn_rate({"model": "c"}, models))
+    def test_scroll_target(self):
+        done = self.view([self.row("u-1", "user", text="x"), self.row("a-1", "agent", text="y")])
+        self.assertEqual(chatview.scroll_target(done), chatview.anchor("a-1"))
+        working = self.view([self.row("u-1", "user", text="x"), self.row("a-1", "agent", status="pending")])
+        self.assertEqual(chatview.scroll_target(working), "end")
+        self.assertEqual(chatview.scroll_target(self.view([])), "end")
 
     def test_copy_has_no_dashes_and_no_free_pitch(self):
-        texts = [chat_module.cost_line(70), chat_module.cost_line(None)] + [full for _, full in chat_module.EXAMPLES]
-        for row in ({"status": "failed", "error_code": code} for code in ("insufficient_credits", "timeout", "x")):
-            texts.append(chat_module.failure_text(row))
+        texts = [core_chat.cost_line(70), core_chat.cost_line(None)] + [s for pair in chatview.EXAMPLES for s in pair]
         for text in texts:
             self.assertNotIn(" - ", text)
             self.assertNotIn(chr(0x2014), text)
             self.assertNotIn("free", text.lower())
             self.assertNotIn("Nolgia", text)
+        self.assertTrue(core_chat.cost_line(70).startswith("NOLGIA Agent works right here"))
 
 
 if __name__ == "__main__":

@@ -13,3 +13,17 @@ APP = "resolve"
 DEFAULT_API_URL = "https://api.nolgia.ai/v1"
 DEVICE_CLIENT_ID = "nolgia-resolve"
 DEVICE_SCOPE = "bridge assets:read assets:write"
+
+# nolgia.ai pages the panel opens.
+AGENT_URL = "https://nolgia.ai/agent"
+BILLING_URL = "https://nolgia.ai/billing"
+
+# The line under the chat box: NOLGIA Agent first, at the person's own rate
+# when NOLGIA tells it (GET /agent/models for the Agent's brain), then the
+# agents people already know.
+OTHER_AGENTS = "Claude, Cursor, Codex or another agent"
+COST_LINE_RATE = (
+    "NOLGIA Agent works right here, each turn from {credits} credits on your model. "
+    "You can also use " + OTHER_AGENTS + " with NOLGIA connected."
+)
+COST_LINE = COST_LINE_RATE.replace("{credits}", "10")

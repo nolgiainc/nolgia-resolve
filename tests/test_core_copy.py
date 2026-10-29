@@ -110,20 +110,22 @@ class CoreCopy(unittest.TestCase):
 
     def test_init_differs_only_in_the_app_constants(self):
         def constants(folder):
+            # Each assignment's expression, as written (a constant may be built
+            # from another, like COST_LINE from COST_LINE_RATE).
             tree = ast.parse(read(folder, "__init__.py"))
             out = {}
             for node in tree.body:
                 if isinstance(node, ast.Assign):
                     for target in node.targets:
-                        out[target.id] = ast.literal_eval(node.value)
+                        out[target.id] = node.value
             return out
 
         blender, resolve = constants(BLENDER_CORE), constants(RESOLVE_CORE)
         self.assertEqual(set(blender), set(resolve))
         for key in set(blender) - PER_APP_INIT:
-            self.assertEqual(resolve[key], blender[key], key)
-        self.assertEqual(resolve["APP"], "resolve")
-        self.assertEqual(resolve["DEVICE_CLIENT_ID"], "nolgia-resolve")
+            self.assertEqual(ast.dump(resolve[key]), ast.dump(blender[key]), key)
+        self.assertEqual(ast.literal_eval(resolve["APP"]), "resolve")
+        self.assertEqual(ast.literal_eval(resolve["DEVICE_CLIENT_ID"]), "nolgia-resolve")
 
     def test_the_rule_catches_a_drift(self):
         # A change outside the allowed places shows up.

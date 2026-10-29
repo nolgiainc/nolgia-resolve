@@ -179,6 +179,60 @@ class ApiClient:
             "POST", "/bridge/commands/%s/result" % urllib.parse.quote(command_id), body
         )
 
+    # ---------------------------------------------------------------- agent
+    #
+    # The panel's chat goes to the person's NOLGIA Agent through the routes
+    # nolgia.ai's own chat uses: a message goes in, a pending reply row comes
+    # back, and the reply is read until it settles.
+
+    def get_agent(self):
+        """GET /agent: the person's NOLGIA Agent, or None when none is set up (404)."""
+        try:
+            return self.request("GET", "/agent").json() or None
+        except ApiError as err:
+            if err.status == 404 and not isinstance(err, Unauthorized):
+                return None
+            raise
+
+    def list_agent_models(self):
+        """GET /agent/models: the brains and what a turn costs on each."""
+        data = self.request("GET", "/agent/models").json() or {}
+        models = data.get("models")
+        return models if isinstance(models, list) else []
+
+    def wake_agent(self):
+        """POST /agent/wake: start waking a sleeping agent early."""
+        return self.request("POST", "/agent/wake").json() or None
+
+    def submit_agent_message(self, body):
+        """POST /agent/messages: {user_message_id, agent_message_id?, session_id}."""
+        return self.request("POST", "/agent/messages", body).json() or {}
+
+    def list_agent_messages(self, session_id, since=None, limit=200):
+        """GET /agent/messages: one session's transcript, oldest first."""
+        query = {"session_id": session_id, "limit": limit}
+        if since:
+            query["since"] = since
+        data = self.request("GET", "/agent/messages", query=query).json() or {}
+        rows = data.get("messages")
+        return rows if isinstance(rows, list) else []
+
+    def get_agent_message(self, message_id):
+        return self.request("GET", "/agent/messages/%s" % urllib.parse.quote(message_id)).json()
+
+    def create_agent_session(self, body):
+        """POST /agent/sessions: a new chat, pinned to this DaVinci Resolve (`app`)."""
+        return self.request("POST", "/agent/sessions", body).json() or {}
+
+    def get_agent_session(self, session_id):
+        return self.request("GET", "/agent/sessions/%s" % urllib.parse.quote(session_id)).json()
+
+    def interrupt_agent_session(self, session_id):
+        """POST /agent/sessions/{id}/interrupt: stop the session's running turn."""
+        return self.request(
+            "POST", "/agent/sessions/%s/interrupt" % urllib.parse.quote(session_id)
+        ).json() or {}
+
     # --------------------------------------------------------------- assets
 
     def get_asset(self, asset_id):

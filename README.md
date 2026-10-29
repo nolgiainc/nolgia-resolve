@@ -4,8 +4,8 @@ NOLGIA's plugin for DaVinci Resolve. It connects DaVinci Resolve on your compute
 NOLGIA, so NOLGIA Agent can look at your project, make changes in it, render
 previews and move files between the app and your NOLGIA library. Tell it what
 you want in the NOLGIA window's chat, right inside Resolve. You can also use
-Claude Code, Cursor, Codex or another agent with NOLGIA connected (through
-NOLGIA's MCP server).
+Claude, Cursor, Codex or another agent with NOLGIA connected (through NOLGIA's
+MCP server).
 
 ```
 your agent --MCP--> mcp.nolgia.ai --> api.nolgia.ai <--(the plugin connects out)-- DaVinci Resolve on your computer
@@ -71,9 +71,10 @@ suggests a few things to ask; a click puts one in the box.
 - **One chat per install.** The chat is a NOLGIA Agent chat like the ones on
   nolgia.ai/agent (Open on nolgia.ai opens it there), pinned to this Resolve:
   every turn tells the Agent the conversation is about this window. New chat
-  starts another. The window remembers the chat for the same account and
-  install, in `settings.json` (`chat_session_id` and the account, API and
-  install it belongs to); signing out forgets it.
+  starts another. The window shows the last three turns; the whole chat is on
+  nolgia.ai. It remembers the chat in `chat.json` next to `settings.json`
+  (with the account and API it belongs to; a chat pinned to another install
+  is never taken over); signing out forgets it.
 - **One message is one turn.** While NOLGIA Agent works, Send waits (you can
   type your next message meanwhile); Stop ends the turn. A question from the
   Agent comes with its answers as buttons below the chat.
@@ -87,8 +88,11 @@ suggests a few things to ask; a click puts one in the box.
 The chat uses the same API routes as nolgia.ai's chat (`POST /agent/sessions`
 with `app: {app: "resolve", instance_id}`, `POST /agent/messages`, the reply
 read with `GET /agent/messages/{id}` until it settles, and
-`POST /agent/sessions/{id}/interrupt`), with the window's sign in. Its code is
-[`nolgia_resolve/chat.py`](nolgia_resolve/chat.py).
+`POST /agent/sessions/{id}/interrupt`), with the window's sign in. The chat
+itself is [`core/chat.py`](nolgia_resolve/core/chat.py), the same file as the
+Blender plugin's (it runs on its own thread and never calls Resolve); how the
+window shows it is [`nolgia_resolve/chatview.py`](nolgia_resolve/chatview.py)
+and [`nolgia_resolve/panel.py`](nolgia_resolve/panel.py).
 
 ## Settings
 

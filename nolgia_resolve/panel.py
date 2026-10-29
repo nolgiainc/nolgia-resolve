@@ -12,7 +12,8 @@ import sys
 import time
 import traceback
 
-from . import chat as chat_module
+from . import chatview
+from .core import AGENT_URL
 from .core.commands import ActivityLog
 from .core.worker import Status
 from .runtime import Controller, env_flag
@@ -143,7 +144,7 @@ class Panel:
                       "Alignment": {"AlignTop": True, "AlignLeft": True}}),
         ] + [
             ui.Button({"ID": "Example%d" % i, "Text": short, "Weight": 0, "ToolTip": full})
-            for i, (short, full) in enumerate(chat_module.EXAMPLES)
+            for i, (short, full) in enumerate(chatview.EXAMPLES)
         ] + [
             ui.TextEdit({"ID": "Thread", "ReadOnly": True, "Weight": 3, "MinimumSize": [0, THREAD_MIN_PX]}),
             # A question's answers, two to a row (hidden while a notice shows:
@@ -206,10 +207,10 @@ class Panel:
         on.Send.Clicked = self._guard(lambda ev: self._send_from_box())
         on.Stop.Clicked = self._guard(lambda ev: chat.stop())
         on.NewChat.Clicked = self._guard(lambda ev: chat.new_chat())
-        on.OpenWeb.Clicked = self._guard(lambda ev: self._open(chat.view()["session_url"] or chat_module.AGENT_URL))
+        on.OpenWeb.Clicked = self._guard(lambda ev: self._open(chat.view()["session_url"] or AGENT_URL))
         on.ChatAction.Clicked = self._guard(self._on_chat_action)
         on.Box.TextChanged = self._guard(self._on_box_changed)
-        for i, (_short, full) in enumerate(chat_module.EXAMPLES):
+        for i, (_short, full) in enumerate(chatview.EXAMPLES):
             on["Example%d" % i].Clicked = self._guard(lambda ev, text=full: self._put_in_box(text))
         for i in range(OPTIONS):
             on["Option%d" % i].Clicked = self._guard(lambda ev, n=i: self._on_option(n))
@@ -250,7 +251,8 @@ class Panel:
         ctl.tick()
         if self._scroll_to:
             self._scroll_thread()
-        busy = ctl.login is not None or (ctl.worker is not None and ctl.worker.busy_with is not None)
+        busy = (ctl.login is not None or (ctl.worker is not None and ctl.worker.busy_with is not None)
+                or ctl.chat.busy)
         time.sleep(YIELD_BUSY if busy else YIELD_IDLE)  # let the network threads run
 
     def _on_connected(self, ev):
@@ -284,16 +286,10 @@ class Panel:
         ctl = self.controller
         if ctl.chat_blocker() or ctl.chat.busy:
             return
-        text = str(self.items["Box"].PlainText or "")
-
-        def sent(accepted):
-            # Clear the box only when NOLGIA took the message and the person
-            # has not typed something new meanwhile.
-            if accepted and str(self.items["Box"].PlainText or "") == text:
-                self._set_box("")
-            self.refresh()
-
-        ctl.chat.send(text, on_sent=sent)
+        # The box empties as the message goes; if NOLGIA refuses it, the
+        # chat hands the text back (take_restore, in _draw_chat).
+        if ctl.chat.send(str(self.items["Box"].PlainText or "")):
+            self._set_box("")
 
     def _on_box_changed(self, ev):
         """Enter at the end of the message sends it (as in the chat on
@@ -506,7 +502,7 @@ class Panel:
             _show(it["OpenWeb"], visible),
             _show(it["ChatCost"], visible),
         ]
-        for i in range(len(chat_module.EXAMPLES)):
+        for i in range(len(chatview.EXAMPLES)):
             shown.append(_show(it["Example%d" % i], intro))
         for i in range(OPTIONS):
             label = self._options[i] if i < len(self._options) else ""
@@ -517,6 +513,9 @@ class Panel:
         if not visible:
             self._thread_drawn = None
             return shown
+        restore = ctl.chat.take_restore()
+        if restore and not str(it["Box"].PlainText or "").strip():
+            self._set_box(restore)
         it["ChatWorking"].Text = view["working"] or ""
         it["ChatNotice"].Text = notice["text"] if notice else ""
         it["ChatAction"].Text = notice["label"] if notice else ""
@@ -530,10 +529,8 @@ class Panel:
         signature = repr((view["hidden"], rows))
         if signature != self._thread_drawn:
             self._thread_drawn = signature
-            self.items["Thread"].HTML = chat_module.thread_html(view)
-            newest = rows[-1] if rows else None
-            # A finished reply is read from its start, anything else from the end.
-            self._scroll_to = chat_module.anchor(newest["id"]) if newest and newest["role"] == "agent" else "end"
+            self.items["Thread"].HTML = chatview.thread_html(view)
+            self._scroll_to = chatview.scroll_target(view)
             self._scroll_ticks = 3
         return shown
 
