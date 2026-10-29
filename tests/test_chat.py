@@ -308,8 +308,9 @@ class ChatWindowTest(unittest.TestCase):
         win = panel_module.Panel(None, fusion, bmd, controller=again).build()
         disp = bmd.dispatchers[0]
         again.connect()
+        # The chat reads on its own thread; the window draws on its next tick.
         end = time.time() + 30
-        while time.time() < end and not again.chat.loaded:
+        while time.time() < end and "First reply" not in win.Find("Thread").HTML:
             disp.tick(panel_module.TIMER_ID)
             time.sleep(0.02)
         self.assertEqual(again.chat.session_id, session_id)
