@@ -99,9 +99,11 @@ class ChatWindowTest(unittest.TestCase):
             self.assertIsNotNone(self.item(element_id), element_id)
             self.assertFalse(self.visible(element_id), element_id)
         # Every part fits the window's minimum size: UIManager windows do not
-        # scroll as a whole, the thread and Activity scroll on their own.
+        # scroll as a whole, the thread and Activity scroll on their own. The
+        # thread has no hard minimum: in a window made too short it shrinks
+        # instead of spilling under the text box (test_panel).
         self.assertGreaterEqual(self.win.props["MinimumSize"][1], 760)
-        self.assertGreaterEqual(self.item("Thread").props["MinimumSize"][1], 100)
+        self.assertNotIn("MinimumSize", self.item("Thread").props)
         self.assertEqual(self.item("Activity").props["MaximumSize"][1], panel_module.ACTIVITY_MAX_PX)
         # Button text sets a minimum width: no example label may widen the window.
         for short, full in chatview.EXAMPLES:

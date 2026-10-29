@@ -8,6 +8,7 @@ this Resolve. A UIManager timer calls Controller.tick() every 100 ms on the
 script's thread, which runs the commands, and redraws what changed.
 """
 
+import os
 import sys
 import time
 import traceback
@@ -50,16 +51,32 @@ MIN_WIDTH = 420
 MIN_HEIGHT = 780
 DEFAULT_HEIGHT = 860
 # Resolve on macOS lets the window be dragged shorter than its MinimumSize
-# (the owner's Mac test, 2026-10-29: below about 650 pt the text box sat over
-# the chat). The window cannot scroll as a whole, so every so many ticks the
-# height is read and, when it is under MIN_HEIGHT, put back.
-HEIGHT_CHECK_TICKS = 10
+# (the owner's Mac tests, 2026-10-29: to about 646 pt, where the text box sat
+# over the chat). Two things keep that from showing:
+# - The parts that can give up height (the chat's thread, the text box and
+#   the Activity list) have no hard minimum. A UIManager element with a
+#   MinimumSize keeps it when its window is too short and spills over the
+#   next one (the thread under the text box); without one it shrinks, and the
+#   thread and Activity scroll on their own. Only labels keep a minimum (the
+#   height of their two lines), so they never cut a word off.
+# - Every tick the height is read and, when it is under MIN_HEIGHT, put back.
+HEIGHT_CHECK_TICKS = 1
+# Quitting Resolve (File > Quit, Cmd+Q, its main window's close button) while a
+# script's window is open does not finish (the owner's Mac test 2, 2026-10-29;
+# the same on Windows 11): Resolve saves and closes the project, opens a new
+# Untitled Project, asks script windows to close, and gives the quit up because
+# the script is still running then, leaving itself open with no windows. Only
+# resolve.Quit() finishes a quit while a script runs. So the window notes when
+# the current project changes, and a Close that comes within this many seconds
+# of a change, with none of Resolve's own windows left on screen where that can
+# be read (Windows), is Resolve quitting: once the window is closed, NOLGIA
+# finishes the quit with resolve.Quit().
+PROJECT_CHECK_TICKS = 5
+QUIT_SWITCH_SECONDS = 1.5
 STATUS_LINES_PX = 40
 FOOTER_LINES_PX = 36
 COST_LINES_PX = 54
-THREAD_MIN_PX = 110
 BOX_PX = 56
-ACTIVITY_MIN_PX = 72
 ACTIVITY_MAX_PX = 220
 # Button text sets a minimum width: kept short so no button widens the window.
 EXAMPLE_CHARS = 44
@@ -125,6 +142,9 @@ class Panel:
         self._closed = False
         self._ticks = 0
         self._height_check_off = False
+        self._project_seen = None
+        self._project_changed_at = None
+        self._finish_quit = False
         global current
         current = self
 
@@ -173,7 +193,7 @@ class Panel:
             ui.Button({"ID": "Example%d" % i, "Text": short, "Weight": 0, "ToolTip": full})
             for i, (short, full) in enumerate(chatview.EXAMPLES)
         ] + [
-            ui.TextEdit({"ID": "Thread", "ReadOnly": True, "Weight": 3, "MinimumSize": [0, THREAD_MIN_PX]}),
+            ui.TextEdit({"ID": "Thread", "ReadOnly": True, "Weight": 3}),
             # A question's answers, two to a row (hidden while a notice shows:
             # the person can always type the answer instead).
             ui.HGroup({"Weight": 0}, [ui.Button({"ID": "Option0", "Text": ""}), ui.Button({"ID": "Option1", "Text": ""})]),
@@ -187,7 +207,7 @@ class Panel:
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
             ui.Button({"ID": "ChatAction", "Text": "", "Weight": 0}),
             ui.TextEdit({"ID": "Box", "Weight": 0, "PlaceholderText": "Ask NOLGIA Agent to make or change something here",
-                         "MinimumSize": [0, BOX_PX], "MaximumSize": [16777215, BOX_PX]}),
+                         "MaximumSize": [16777215, BOX_PX]}),
             ui.HGroup({"Weight": 0}, [
                 ui.Button({"ID": "Stop", "Text": "Stop", "Weight": 0}),
                 ui.HGap(0, 1),
@@ -203,8 +223,7 @@ class Panel:
                 ui.Button({"ID": "Pause", "Text": "Pause", "Weight": 0}),
             ]),
             ui.Tree({"ID": "Activity", "Weight": 1, "RootIsDecorated": False, "AlternatingRowColors": True,
-                     "SelectionMode": "NoSelection", "MinimumSize": [0, ACTIVITY_MIN_PX],
-                     "MaximumSize": [16777215, ACTIVITY_MAX_PX]}),
+                     "SelectionMode": "NoSelection", "MaximumSize": [16777215, ACTIVITY_MAX_PX]}),
             ui.Label({"ID": "Footer", "Text": FOOTER, "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
         ])
@@ -276,6 +295,8 @@ class Panel:
             self.log("The NOLGIA window is running (timer ticks).")
         if self._ticks % HEIGHT_CHECK_TICKS == 0:
             self._keep_min_height()
+        if self._ticks % PROJECT_CHECK_TICKS == 0:
+            self._note_project()
         ctl = self.controller
         ctl.tick()
         if self._scroll_to:
@@ -370,7 +391,11 @@ class Panel:
         if self._closed:
             return
         self._closed = True
-        self.log("The NOLGIA window closed; switching off.")
+        self._finish_quit = ev is not None and self._resolve_is_quitting()
+        if self._finish_quit:
+            self.log("DaVinci Resolve is quitting; switching off.")
+        else:
+            self.log("The NOLGIA window closed; switching off.")
         try:
             if self.timer is not None:
                 self.timer.Stop()
@@ -379,6 +404,27 @@ class Panel:
         self.controller.shutdown(wait=3.0)
         self._close_request()
         self.disp.ExitLoop()
+
+    def _note_project(self):
+        """Remember the current project's id and when it last changed."""
+        try:
+            project = self.resolve.GetProjectManager().GetCurrentProject()
+            seen = project.GetUniqueId() if project is not None else None
+        except Exception:
+            return
+        if seen != self._project_seen:
+            if self._project_seen is not None:
+                self._project_changed_at = time.monotonic()
+            self._project_seen = seen
+
+    def _resolve_is_quitting(self):
+        """True when this Close is Resolve quitting (see QUIT_SWITCH_SECONDS),
+        not the person closing the NOLGIA window."""
+        self._note_project()
+        changed = self._project_changed_at
+        if changed is None or time.monotonic() - changed > QUIT_SWITCH_SECONDS:
+            return False
+        return resolve_windows_on_screen() is not True
 
     def _approvals_changed(self):
         self.show_request()
@@ -396,8 +442,21 @@ class Panel:
         win = self.request_win or self._build_request()
         request = first.request
         items = win.GetItems()
+        code = bool(getattr(request, "is_code", False))
+        text = "\n".join(request.lines)[:MAX_CODE_CHARS]
         items["RequestTitle"].Text = request.title
-        items["RequestCode"].PlainText = "\n".join(request.lines)[:MAX_CODE_CHARS]
+        # Code is shown as Python; a plain-English plan (a DIT copy, opening a
+        # project) as plain text, never coloured like code.
+        items["RequestCode"].PlainText = text if code else ""
+        items["RequestText"].PlainText = "" if code else text
+        changed = _show(items["RequestCode"], code)
+        changed = _show(items["CodeNote"], code) or changed
+        changed = _show(items["RequestText"], not code) or changed
+        if changed:
+            try:
+                win.RecalcLayout()
+            except Exception:
+                pass
         items["Approve"].Text = request.approve_label
         win.Show()
         try:
@@ -416,7 +475,8 @@ class Panel:
                       "Font": ui.Font({"Bold": True})}),
             ui.TextEdit({"ID": "RequestCode", "PlainText": "", "ReadOnly": True, "Font": mono,
                          "LineWrapMode": "NoWrap", "Lexer": "python", "Weight": 1}),
-            ui.Label({"Text": "Code runs on this computer with your permissions.", "Weight": 0}),
+            ui.TextEdit({"ID": "RequestText", "PlainText": "", "ReadOnly": True, "Weight": 1}),
+            ui.Label({"ID": "CodeNote", "Text": "Code runs on this computer with your permissions.", "Weight": 0}),
             ui.HGroup({"Weight": 0}, [
                 ui.HGap(0, 1),
                 ui.Button({"ID": "Deny", "Text": "Deny"}),
@@ -579,11 +639,20 @@ class Panel:
         if self._scroll_ticks <= 0:
             self._scroll_to = None
 
+    def _set_min_size(self):
+        """Give the shown window its MinimumSize again: set before the window
+        exists, macOS may not apply it to the window it makes."""
+        try:
+            self.win.MinimumSize = [MIN_WIDTH, MIN_HEIGHT]
+        except Exception:
+            pass
+
     def _keep_min_height(self):
         """Put the window back to MIN_HEIGHT when it was made shorter (see
         HEIGHT_CHECK_TICKS). Windows keeps the minimum itself, so this does
         nothing there; a UIManager that cannot tell the window's size or
-        resize it turns the check off."""
+        resize it turns the check off (the layout then only shrinks the
+        thread, the box and Activity)."""
         if self._height_check_off:
             return
         try:
@@ -650,6 +719,8 @@ class Panel:
             ctl.settings.update(connected=False)
         self.refresh(force=True)
         self.win.Show()
+        self._set_min_size()
+        self._note_project()
         self.log("NOLGIA window open (plugin %s, DaVinci Resolve %s, Python %s at %s)."
                  % (_plugin_version(), ctl.ops.app_version(), sys.version.split()[0], sys.executable))
         try:
@@ -663,7 +734,59 @@ class Panel:
             except Exception:
                 pass
             self._close_request()
+            if self._finish_quit:
+                self._quit_resolve()
         return True
+
+    def _quit_resolve(self):
+        """Finish the quit Resolve gave up while this window was open."""
+        self.log("Finishing DaVinci Resolve's quit.")
+        try:
+            self.resolve.Quit()
+        except Exception:
+            self.log("DaVinci Resolve did not take the quit:\n" + traceback.format_exc())
+
+
+# The titles of NOLGIA's own windows, which do not count as Resolve's.
+OWN_TITLES = ("NOLGIA", "NOLGIA request")
+
+
+def resolve_windows_on_screen():
+    """True when DaVinci Resolve (the program that started this script) shows
+    a window of its own, False when it shows none, None when that cannot be
+    read here (macOS and Linux)."""
+    if not sys.platform.startswith("win"):
+        return None
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        resolve_pid = os.getppid()
+        found = []
+        proc = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+        def visit(hwnd, _lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            owner = wintypes.DWORD()
+            user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value != resolve_pid:
+                return True
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length <= 0:
+                return True
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            if title.value in OWN_TITLES:
+                return True
+            found.append(title.value)
+            return False
+
+        user32.EnumWindows(proc(visit), 0)
+        return bool(found)
+    except Exception:
+        return None
 
 
 def _who(ev):
