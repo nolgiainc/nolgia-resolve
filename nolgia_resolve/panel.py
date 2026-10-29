@@ -66,13 +66,25 @@ HEIGHT_CHECK_TICKS = 1
 # the same on Windows 11): Resolve saves and closes the project, opens a new
 # Untitled Project, asks script windows to close, and gives the quit up because
 # the script is still running then, leaving itself open with no windows. Only
-# resolve.Quit() finishes a quit while a script runs. So the window notes when
-# the current project changes, and a Close that comes within this many seconds
-# of a change, with none of Resolve's own windows left on screen where that can
-# be read (Windows), is Resolve quitting: once the window is closed, NOLGIA
-# finishes the quit with resolve.Quit().
+# resolve.Quit() finishes a quit while a script runs. Quitting someone's
+# Resolve by mistake is worse than that, so a Close counts as Resolve quitting
+# only when all of these hold, and then, once the window is closed, NOLGIA
+# finishes the quit with resolve.Quit():
+# - the current project changed less than QUIT_SWITCH_SECONDS ago (the window
+#   reads it when it opens and every PROJECT_CHECK_TICKS ticks),
+# - to a project this window has not seen before,
+# - named UNTITLED_PROJECT, with no timelines, no clips and no bins,
+# - not saved in the project library (the one Resolve opens while quitting
+#   never is),
+# - and, where that can be read (Windows), none of Resolve's own windows is
+#   left on screen.
+# Anything that cannot be read counts against quitting. On macOS a new
+# project made with New Project and closed straight away still looks like
+# that (it is not in the library until it is saved), so only a NOLGIA window
+# closed within QUIT_SWITCH_SECONDS of making one would quit Resolve there.
 PROJECT_CHECK_TICKS = 5
 QUIT_SWITCH_SECONDS = 1.5
+UNTITLED_PROJECT = "Untitled Project"
 STATUS_LINES_PX = 40
 FOOTER_LINES_PX = 36
 COST_LINES_PX = 54
@@ -143,7 +155,9 @@ class Panel:
         self._ticks = 0
         self._height_check_off = False
         self._project_seen = None
+        self._projects_seen = set()
         self._project_changed_at = None
+        self._project_is_new = False
         self._finish_quit = False
         global current
         current = self
@@ -393,7 +407,8 @@ class Panel:
         self._closed = True
         self._finish_quit = ev is not None and self._resolve_is_quitting()
         if self._finish_quit:
-            self.log("DaVinci Resolve is quitting; switching off.")
+            self.log("DaVinci Resolve is quitting (its new Untitled Project opened %.2f s before the window "
+                     "closed); switching off." % (time.monotonic() - self._project_changed_at))
         else:
             self.log("The NOLGIA window closed; switching off.")
         try:
@@ -406,16 +421,22 @@ class Panel:
         self.disp.ExitLoop()
 
     def _note_project(self):
-        """Remember the current project's id and when it last changed."""
+        """Remember the current project's id, when it last changed and whether
+        it changed to one this window had not seen (a moment with no project
+        open does not count)."""
         try:
             project = self.resolve.GetProjectManager().GetCurrentProject()
             seen = project.GetUniqueId() if project is not None else None
         except Exception:
             return
+        if not seen:
+            return
         if seen != self._project_seen:
             if self._project_seen is not None:
                 self._project_changed_at = time.monotonic()
+                self._project_is_new = seen not in self._projects_seen
             self._project_seen = seen
+        self._projects_seen.add(seen)
 
     def _resolve_is_quitting(self):
         """True when this Close is Resolve quitting (see QUIT_SWITCH_SECONDS),
@@ -424,7 +445,36 @@ class Panel:
         changed = self._project_changed_at
         if changed is None or time.monotonic() - changed > QUIT_SWITCH_SECONDS:
             return False
-        return resolve_windows_on_screen() is not True
+        if not (self._project_is_new and self._is_quit_project()):
+            self.log("The project changed just before the NOLGIA window closed, but not to the new empty "
+                     "Untitled Project Resolve opens when it quits; DaVinci Resolve stays open.")
+            return False
+        on_screen = resolve_windows_on_screen()
+        if sys.platform.startswith("win"):
+            return on_screen is False
+        return on_screen is not True
+
+    def _is_quit_project(self):
+        """Whether the current project is the one Resolve opens while quitting:
+        new, named UNTITLED_PROJECT, empty and not in the project library."""
+        try:
+            pm = self.resolve.GetProjectManager()
+            project = pm.GetCurrentProject()
+            if project is None or project.GetUniqueId() != self._project_seen:
+                return False
+            name = project.GetName()
+            if name != UNTITLED_PROJECT or project.GetTimelineCount() != 0:
+                return False
+            root = project.GetMediaPool().GetRootFolder()
+            clips, bins = root.GetClipList(), root.GetSubFolderList()
+            if not isinstance(clips, (list, dict)) or not isinstance(bins, (list, dict)) or clips or bins:
+                return False
+            names = pm.GetProjectListInCurrentFolder()
+            if not isinstance(names, (list, dict)) or name in names:
+                return False
+            return not pm.GetProjectLastModifiedTime(name)
+        except Exception:
+            return False
 
     def _approvals_changed(self):
         self.show_request()

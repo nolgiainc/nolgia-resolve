@@ -257,14 +257,34 @@ the project since it was last saved.
   the quit up and stays open with no windows. That happens with any script
   window, even a minimal one that closes at once, and never without one
   (Resolve Studio 21.1.1 on Windows 11; the same on the owner's Mac). Only a
-  script's own `resolve.Quit()` finishes it. So 0.2.3 tells Resolve's quit
-  from someone closing the NOLGIA window (a Close right after the project
-  changed, with none of Resolve's own windows left on screen where Windows
-  can say), closes and calls `resolve.Quit()`. On macOS it reads only the
-  project change, so closing the NOLGIA window within 1.5 seconds of opening
-  another project would also quit Resolve.
+  script's own `resolve.Quit()` finishes it. So the NOLGIA window finishes
+  the quit itself, but only on Resolve's own quit sequence: a Close less than
+  1.5 seconds after the project changed to one the window had not seen,
+  named "Untitled Project", with no timelines, no clips and no bins, not
+  saved in the project library, and (on Windows, where it can be read) with
+  none of Resolve's own windows left on screen. Opening any other project
+  and closing the NOLGIA window never quits Resolve, and neither does
+  anything the window cannot read. On macOS one case still looks the same:
+  New Project (an empty, unsaved "Untitled Project") and closing the NOLGIA
+  window within 1.5 seconds. On Windows Resolve's main window rules that
+  out. If Resolve's interface is in another language its new project has
+  another name, and a quit then stays as it was before 0.2.3.
 
 ## Tested on
+
+0.2.4 (October 29, 2026): the NOLGIA window finishes Resolve's quit only on
+Resolve's own quit sequence (see Known limits); in 0.2.3 on macOS, closing
+the NOLGIA window within 1.5 seconds of opening another project would have
+quit Resolve too. Checked in Resolve Studio 21.1.1 on Windows 11, once as
+the window decides on Windows and once as it decides on macOS (with
+Resolve's windows not read): quitting Resolve with the NOLGIA window open
+quit it both ways (the new Untitled Project opened 0.02 to 0.03 s before
+the window closed), also from Resolve's own Untitled Project at start;
+opening a saved project with a timeline and closing the NOLGIA window 0.5 s
+later left Resolve open (the log says why); a new "Untitled Project" made
+by a script and the window closed 3 s later left it open; on Windows also
+at once. Unit tests and the in-app test (12/12). On macOS it waits for its
+re-test.
 
 0.2.3 (October 29, 2026), from the owner's second Mac test (of 0.2.2): when the
 window is dragged shorter than its minimum, the chat's thread, the text box

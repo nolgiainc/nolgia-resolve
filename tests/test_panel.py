@@ -6,6 +6,7 @@ import shutil
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import support
 import fake_resolve as fake
@@ -252,20 +253,56 @@ class PanelTest(unittest.TestCase):
         self.assertIn(sid, [d["session_id"] for d in deleted])
         self.assertTrue(Settings(self.tmp)["connected"], "closing the window keeps Connected for next time")
 
-    def _fake_resolve(self):
+    def _fake_resolve(self, windows_on_screen=None):
+        """A Resolve with a project manager, and resolve_windows_on_screen
+        answering windows_on_screen (None, as on macOS, by default)."""
+        class Folder:
+            def __init__(self, clips, bins):
+                self.clips, self.bins = clips, bins
+
+            def GetClipList(self):
+                return list(self.clips)
+
+            def GetSubFolderList(self):
+                return list(self.bins)
+
+        class Pool:
+            def __init__(self, folder):
+                self.folder = folder
+
+            def GetRootFolder(self):
+                return self.folder
+
         class Project:
-            def __init__(self, uid):
-                self.uid = uid
+            def __init__(self, uid, name="Client cut", timelines=0, clips=(), bins=()):
+                self.uid, self.name, self.timelines = uid, name, timelines
+                self.pool = Pool(Folder(clips, bins))
 
             def GetUniqueId(self):
                 return self.uid
 
+            def GetName(self):
+                return self.name
+
+            def GetTimelineCount(self):
+                return self.timelines
+
+            def GetMediaPool(self):
+                return self.pool
+
         class Manager:
             def __init__(self):
-                self.project = Project("project-a")
+                self.project = Project("project-a", timelines=2, clips=["A001.mov"])
+                self.library = {"Client cut": "Wed Oct 28 18:02:11 2026"}
 
             def GetCurrentProject(self):
                 return self.project
+
+            def GetProjectListInCurrentFolder(self):
+                return sorted(self.library)
+
+            def GetProjectLastModifiedTime(self, name):
+                return self.library.get(name, "")
 
         class Resolve:
             def __init__(self):
@@ -279,62 +316,150 @@ class PanelTest(unittest.TestCase):
                 self.quits += 1
 
         fake_resolve = Resolve()
+        fake_resolve.Project = Project
         self.panel.resolve = fake_resolve
+        self.addCleanup(setattr, panel_module, "resolve_windows_on_screen", panel_module.resolve_windows_on_screen)
+        panel_module.resolve_windows_on_screen = lambda: windows_on_screen
+        for _ in range(panel_module.PROJECT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
         return fake_resolve
 
-    def test_resolve_quitting_closes_the_window_and_the_quit_is_finished(self):
-        # The owner's Mac test 2: with the NOLGIA window open, Quit DaVinci
-        # Resolve left Resolve open with no windows. Resolve quits by closing
-        # the project for a new Untitled Project, then closing script windows.
-        resolve = self._fake_resolve()
-        on_screen = []
-        self.addCleanup(setattr, panel_module, "resolve_windows_on_screen", panel_module.resolve_windows_on_screen)
-        panel_module.resolve_windows_on_screen = lambda: on_screen[0] if on_screen else None
-        for _ in range(panel_module.PROJECT_CHECK_TICKS):
-            self.disp.tick(panel_module.TIMER_ID)
-        resolve.manager.project = type(resolve.manager.project)("untitled-new")
+    def _resolve_quits(self, resolve):
+        """What Resolve does on a quit: it closes the project for a new empty
+        Untitled Project (not in the library), then closes script windows."""
+        resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
         self.win.fire(panel_module.WINDOW_ID, "Close")
-        self.assertTrue(self.disp.exited)
-        self.assertTrue(self.panel._finish_quit)
-        self.panel._quit_resolve()
-        self.assertEqual(resolve.quits, 1)
-        self.assertIn("DaVinci Resolve is quitting; switching off.", self.lines)
 
-    def test_closing_the_window_never_quits_resolve(self):
-        resolve = self._fake_resolve()
-        for _ in range(panel_module.PROJECT_CHECK_TICKS):
-            self.disp.tick(panel_module.TIMER_ID)
-        self.win.fire(panel_module.WINDOW_ID, "Close")
+    def _closes_without_quitting(self, resolve):
+        self.assertTrue(self.disp.exited)
         self.assertFalse(self.panel._finish_quit)
         self.assertEqual(resolve.quits, 0)
         self.assertIn("The NOLGIA window closed; switching off.", self.lines)
 
-    def test_a_project_switch_with_resolve_still_on_screen_is_not_a_quit(self):
+    def test_resolve_quitting_closes_the_window_and_the_quit_is_finished(self):
+        # The owner's Mac test 2: with the NOLGIA window open, Quit DaVinci
+        # Resolve left Resolve open with no windows.
         resolve = self._fake_resolve()
-        self.addCleanup(setattr, panel_module, "resolve_windows_on_screen", panel_module.resolve_windows_on_screen)
-        panel_module.resolve_windows_on_screen = lambda: True
+        self._resolve_quits(resolve)
+        self.assertTrue(self.disp.exited)
+        self.assertTrue(self.panel._finish_quit)
+        self.panel._quit_resolve()
+        self.assertEqual(resolve.quits, 1)
+        self.assertTrue(any(line.startswith("DaVinci Resolve is quitting (its new Untitled Project opened ")
+                            and line.endswith(" s before the window closed); switching off.")
+                            for line in self.lines), self.lines)
+
+    def test_resolve_quitting_on_windows_with_its_windows_gone_is_finished(self):
+        resolve = self._fake_resolve(windows_on_screen=False)
+        with mock.patch("sys.platform", "win32"):
+            self._resolve_quits(resolve)
+        self.assertTrue(self.panel._finish_quit)
+
+    def test_closing_the_window_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_opening_a_real_project_then_closing_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        resolve.manager.library["Ad spot"] = "Thu Oct 29 09:10:00 2026"
+        resolve.manager.project = resolve.Project("project-b", "Ad spot", timelines=1, clips=["B001.mov"])
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+        self.assertTrue(any("DaVinci Resolve stays open" in line for line in self.lines))
+
+    def test_opening_an_empty_saved_project_then_closing_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        resolve.manager.library["Ideas"] = "Thu Oct 29 09:10:00 2026"
+        resolve.manager.project = resolve.Project("project-b", "Ideas")
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_a_new_project_made_by_hand_then_closing_never_quits_resolve(self):
+        # New Project gives a new, empty, unsaved "Untitled Project", just as
+        # Resolve's quit does; closing the window later than that is no quit.
+        resolve = self._fake_resolve()
+        resolve.manager.project = resolve.Project("hand-new", panel_module.UNTITLED_PROJECT)
         for _ in range(panel_module.PROJECT_CHECK_TICKS):
             self.disp.tick(panel_module.TIMER_ID)
-        resolve.manager.project = type(resolve.manager.project)("project-b")
+        self.panel._project_changed_at -= panel_module.QUIT_SWITCH_SECONDS + 0.1
         self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_opening_a_saved_empty_untitled_project_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        resolve.manager.library[panel_module.UNTITLED_PROJECT] = "Thu Oct 29 09:10:00 2026"
+        resolve.manager.project = resolve.Project("saved-untitled", panel_module.UNTITLED_PROJECT)
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_a_saved_project_known_only_by_its_modified_time_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        resolve.manager.GetProjectListInCurrentFolder = lambda: []
+        resolve.manager.library[panel_module.UNTITLED_PROJECT] = "Thu Oct 29 09:10:00 2026"
+        resolve.manager.project = resolve.Project("saved-untitled", panel_module.UNTITLED_PROJECT)
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def _untitled_with(self, **contents):
+        resolve = self._fake_resolve()
+        resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT, **contents)
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_an_untitled_project_with_a_timeline_never_quits_resolve(self):
+        self._untitled_with(timelines=1)
+
+    def test_an_untitled_project_with_a_clip_never_quits_resolve(self):
+        self._untitled_with(clips=["A001.mov"])
+
+    def test_an_untitled_project_with_a_bin_never_quits_resolve(self):
+        self._untitled_with(bins=["Selects"])
+
+    def test_going_back_to_a_project_seen_before_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        untitled = resolve.Project("untitled-1", panel_module.UNTITLED_PROJECT)
+        resolve.manager.project = untitled
+        for _ in range(panel_module.PROJECT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        resolve.manager.project = resolve.Project("project-a", timelines=2)
+        for _ in range(panel_module.PROJECT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        resolve.manager.project = untitled
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_a_project_that_cannot_be_read_never_quits_resolve(self):
+        resolve = self._fake_resolve()
+        project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
+        project.GetMediaPool = lambda: None
+        resolve.manager.project = project
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
+
+    def test_resolve_still_on_screen_is_not_a_quit(self):
+        resolve = self._fake_resolve(windows_on_screen=True)
+        self._resolve_quits(resolve)
         self.assertFalse(self.panel._finish_quit)
 
-    def test_a_close_long_after_a_project_switch_is_not_a_quit(self):
-        resolve = self._fake_resolve()
-        for _ in range(panel_module.PROJECT_CHECK_TICKS):
-            self.disp.tick(panel_module.TIMER_ID)
-        resolve.manager.project = type(resolve.manager.project)("project-b")
-        for _ in range(panel_module.PROJECT_CHECK_TICKS):
-            self.disp.tick(panel_module.TIMER_ID)
-        self.panel._project_changed_at -= panel_module.QUIT_SWITCH_SECONDS + 1
-        self.win.fire(panel_module.WINDOW_ID, "Close")
+    def test_on_windows_a_window_check_that_cannot_be_read_is_not_a_quit(self):
+        resolve = self._fake_resolve(windows_on_screen=None)
+        with mock.patch("sys.platform", "win32"):
+            self._resolve_quits(resolve)
         self.assertFalse(self.panel._finish_quit)
+
+    def test_a_close_long_after_resolve_s_switch_is_not_a_quit(self):
+        resolve = self._fake_resolve()
+        resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
+        for _ in range(panel_module.PROJECT_CHECK_TICKS):
+            self.disp.tick(panel_module.TIMER_ID)
+        self.panel._project_changed_at -= panel_module.QUIT_SWITCH_SECONDS + 0.1
+        self.win.fire(panel_module.WINDOW_ID, "Close")
+        self._closes_without_quitting(resolve)
 
     def test_close_window_from_code_never_quits_resolve(self):
         resolve = self._fake_resolve()
-        for _ in range(panel_module.PROJECT_CHECK_TICKS):
-            self.disp.tick(panel_module.TIMER_ID)
-        resolve.manager.project = type(resolve.manager.project)("untitled-new")
+        resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
         self.panel.close()
         self.assertFalse(self.panel._finish_quit)
 
@@ -342,14 +467,12 @@ class PanelTest(unittest.TestCase):
         # Quitting before the first project check: the window noted the
         # project when it opened, so the switch to Untitled is still seen.
         resolve = self._fake_resolve()
-        self.addCleanup(setattr, panel_module, "resolve_windows_on_screen", panel_module.resolve_windows_on_screen)
-        panel_module.resolve_windows_on_screen = lambda: False
         ctl = Controller(fake.sample(), has_window=True, env=self.env, log=self.lines.append)
         fusion, bmd = fake_ui.Fusion(), fake_ui.Bmd()
         panel = panel_module.Panel(resolve, fusion, bmd, controller=ctl)
 
         def run_loop():
-            resolve.manager.project = type(resolve.manager.project)("untitled-new")
+            resolve.manager.project = resolve.Project("untitled-new", panel_module.UNTITLED_PROJECT)
             fusion.UIManager.windows[panel_module.WINDOW_ID].fire(panel_module.WINDOW_ID, "Close")
 
         panel.build = (lambda build: (lambda: (build(), setattr(bmd.dispatchers[0], "RunLoop", run_loop))[0]))(panel.build)
