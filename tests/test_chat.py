@@ -368,6 +368,15 @@ class ChatViewTest(unittest.TestCase):
         self.assertNotIn("ma2", html, "a reply being worked on is not drawn")
         self.assertTrue(html.endswith('<p><a name="end"></a>&nbsp;</p>'))
 
+    def test_the_button_hint_only_when_there_are_buttons(self):
+        hint = "Answer with a button below"
+        open_question = {"text": "Switch to vertical?", "options": []}
+        with_answers = {"text": "Where?", "options": [{"label": "In DaVinci Resolve", "description": ""}]}
+        html = chatview.thread_html(self.view([self.row("a-1", "agent", text="Switch?", question=open_question)]))
+        self.assertNotIn(hint, html)
+        html = chatview.thread_html(self.view([self.row("a-1", "agent", text="Where?", question=with_answers)]))
+        self.assertIn(hint, html)
+
     def test_scroll_target(self):
         done = self.view([self.row("u-1", "user", text="x"), self.row("a-1", "agent", text="y")])
         self.assertEqual(chatview.scroll_target(done), chatview.anchor("a-1"))

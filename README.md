@@ -18,7 +18,7 @@ on, and it lists every command it runs.
 A script plugin for DaVinci Resolve Studio 21.1 and newer (since 21.1 Resolve
 runs Python scripts only in the Studio edition). It needs Python 3.8 or
 newer and nothing outside Python's standard library. Versions up to 0.1.1
-were tested on Windows and macOS; 0.2.0 (the NOLGIA Agent chat) has been run
+were tested on Windows and macOS; 0.2.x (the NOLGIA Agent chat) has been run
 on Windows only so far. It is written for Linux too, but has not been run
 there yet (see [Tested on](#tested-on)).
 
@@ -247,13 +247,18 @@ the project since it was last saved.
 
 ## Tested on
 
+0.2.1 (October 29, 2026): the chat says "Answer with a button below" only
+when the Agent's question offers answers (a live turn on 0.2.0 ended with an
+open question and the hint showed with no buttons under it). Unit tests.
+
 0.2.0 (the NOLGIA Agent chat) on October 29, 2026, on Windows 11 with
 DaVinci Resolve Studio 21.1.1 (build 10): the unit tests; the in-app test
 against the mock API, which now also drives the chat in the window (its
 first look, a turn working and its reply, a long thread, a question's answer
-buttons, out of credits, Allow NOLGIA Agent off); and one live NOLGIA Agent
-turn against the real API, typed into the window's chat. Not yet run on
-macOS: until it is, 0.2.0 is tested on Windows only.
+buttons, out of credits, Allow NOLGIA Agent off); and live NOLGIA Agent
+turns against the real API, sent from the window's chat (one on the released
+0.2.0: the Agent added a library clip to a new timeline, 70 credits). Not yet
+run on macOS: until it is, 0.2.x is tested on Windows only.
 
 Earlier versions:
 
