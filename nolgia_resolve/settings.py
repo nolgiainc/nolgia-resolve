@@ -21,6 +21,12 @@ DEFAULTS = {
     "connected": False,
     "allow_agent": True,
     "ask_before_run": False,
+    # The NOLGIA Agent chat in the window: the session it is in, kept for the
+    # same API, account and install only.
+    "chat_session_id": "",
+    "chat_api_url": "",
+    "chat_email": "",
+    "chat_instance_id": "",
 }
 
 SECRET_KEYS = ("token",)

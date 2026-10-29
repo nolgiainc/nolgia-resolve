@@ -1,9 +1,11 @@
 # NOLGIA for DaVinci Resolve
 
 NOLGIA's plugin for DaVinci Resolve. It connects DaVinci Resolve on your computer to
-NOLGIA, so your agent (Claude, Cursor, the NOLGIA Agent and others, through
-NOLGIA's MCP server) can look at your project, make changes in it, render
-previews and move files between the app and your NOLGIA library.
+NOLGIA, so NOLGIA Agent can look at your project, make changes in it, render
+previews and move files between the app and your NOLGIA library. Tell it what
+you want in the NOLGIA window's chat, right inside Resolve. You can also use
+Claude Code, Cursor, Codex or another agent with NOLGIA connected (through
+NOLGIA's MCP server).
 
 ```
 your agent --MCP--> mcp.nolgia.ai --> api.nolgia.ai <--(the plugin connects out)-- DaVinci Resolve on your computer
@@ -15,9 +17,10 @@ on, and it lists every command it runs.
 
 A script plugin for DaVinci Resolve Studio 21.1 and newer (since 21.1 Resolve
 runs Python scripts only in the Studio edition). It needs Python 3.8 or
-newer and nothing outside Python's standard library. Tested on Windows and
-macOS; it is written for Linux too, but has not been run there yet (see
-[Tested on](#tested-on)).
+newer and nothing outside Python's standard library. Versions up to 0.1.1
+were tested on Windows and macOS; 0.2.0 (the NOLGIA Agent chat) has been run
+on Windows only so far. It is written for Linux too, but has not been run
+there yet (see [Tested on](#tested-on)).
 
 Which Python runs it: Resolve runs a Scripts menu script in its own
 `fuscript` program with a Python it finds on the computer. On Windows,
@@ -48,13 +51,46 @@ Apple's Python 3.9 also on that Mac, so a Mac needs no Python installed.
    NOLGIA window opens.
 4. Click Sign in. Your browser opens a NOLGIA page; check that the code
    matches the one in the NOLGIA window and approve it.
-5. Keep the NOLGIA window open with Connected on, and ask your agent to work
-   in Resolve. Each command shows up in the Activity list. Click Pause, turn
-   Connected off or close the window to stop at any time.
+5. Keep the NOLGIA window open with Connected on, and tell NOLGIA Agent what
+   to do in the window's chat (or ask your own agent). Each command shows up
+   in the Activity list. Click Pause, turn Connected off or close the window
+   to stop at any time.
 
 NOLGIA works in Resolve only while its window is open: closing it switches
 NOLGIA off. When you open it again it reconnects by itself if you left
 Connected on. To remove the plugin, delete the two files.
+
+## The NOLGIA Agent chat
+
+The NOLGIA window has a chat with your NOLGIA Agent: type what you want done in
+this Resolve and press Enter (or Send). The Agent works in your open project
+through the plugin, so every command it sends shows in the Activity list, and
+its reply comes back in the chat. Before the first message the window
+suggests a few things to ask; a click puts one in the box.
+
+- **One chat per install.** The chat is a NOLGIA Agent chat like the ones on
+  nolgia.ai/agent (Open on nolgia.ai opens it there), pinned to this Resolve:
+  every turn tells the Agent the conversation is about this window. New chat
+  starts another. The window remembers the chat for the same account and
+  install, in `settings.json` (`chat_session_id` and the account, API and
+  install it belongs to); signing out forgets it.
+- **One message is one turn.** While NOLGIA Agent works, Send waits (you can
+  type your next message meanwhile); Stop ends the turn. A question from the
+  Agent comes with its answers as buttons below the chat.
+- **What it costs.** Each turn costs credits on your NOLGIA Agent's model (the
+  window says how many, from NOLGIA), and anything the Agent generates with
+  NOLGIA is priced as usual. Each reply shows what its turn cost.
+- **What it needs.** Connected and Allow NOLGIA Agent on (the window offers
+  the one click when either is off), and a NOLGIA Agent on your account (open
+  nolgia.ai/agent once to start it).
+
+The chat uses the same API routes as nolgia.ai's chat (`POST /agent/sessions`
+with `app: {app: "resolve", instance_id}`, `POST /agent/messages`, the reply
+read with `GET /agent/messages/{id}` until it settles, and
+`POST /agent/sessions/{id}/interrupt`), with the window's sign in. Its code is
+[`nolgia_resolve/chat.py`](nolgia_resolve/chat.py).
+
+## Settings
 
 Settings in the NOLGIA window:
 
@@ -206,6 +242,16 @@ the project since it was last saved.
   updating.
 
 ## Tested on
+
+0.2.0 (the NOLGIA Agent chat) on October 29, 2026, on Windows 11 with
+DaVinci Resolve Studio 21.1.1 (build 10): the unit tests; the in-app test
+against the mock API, which now also drives the chat in the window (its
+first look, a turn working and its reply, a long thread, a question's answer
+buttons, out of credits, Allow NOLGIA Agent off); and one live NOLGIA Agent
+turn against the real API, typed into the window's chat. Not yet run on
+macOS: until it is, 0.2.0 is tested on Windows only.
+
+Earlier versions:
 
 Windows 11 with DaVinci Resolve Studio 21.1.1 (build 10), on October 5,
 2026, against the mock API:

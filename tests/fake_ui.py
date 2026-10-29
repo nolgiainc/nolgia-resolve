@@ -8,8 +8,13 @@ KNOWN_PROPS = {
     "Label": {"ID", "Text", "WordWrap", "Weight", "Font", "Alignment", "Hidden", "MinimumSize"},
     "Button": {"ID", "Text", "Weight", "Hidden", "Enabled", "ToolTip"},
     "CheckBox": {"ID", "Text", "Weight", "Checked", "Hidden", "ToolTip"},
-    "Tree": {"ID", "Weight", "RootIsDecorated", "AlternatingRowColors", "SelectionMode", "ColumnCount", "Hidden"},
-    "TextEdit": {"ID", "PlainText", "ReadOnly", "Font", "LineWrapMode", "Lexer", "Weight"},
+    "Tree": {"ID", "Weight", "RootIsDecorated", "AlternatingRowColors", "SelectionMode", "ColumnCount", "Hidden",
+             "MinimumSize", "MaximumSize"},
+    # HTML, PlaceholderText, MinimumSize, MaximumSize and Enabled: seen working
+    # in Resolve 21.1.1's UIManager (2026-10-29), as were MoveCursor("End"),
+    # EnsureCursorVisible(), ScrollToAnchor(name), SetFocus() and Clear().
+    "TextEdit": {"ID", "PlainText", "HTML", "ReadOnly", "Font", "LineWrapMode", "Lexer", "Weight", "Hidden",
+                 "Enabled", "PlaceholderText", "MinimumSize", "MaximumSize"},
     "Timer": {"ID", "Interval", "SingleShot"},
     "VGroup": {"Spacing", "Weight"},
     "HGroup": {"Spacing", "Weight"},
@@ -71,12 +76,27 @@ class Element:
     def __setattr__(self, name, value):
         self.props[name] = value
 
+    # TextEdit (scrolling is recorded, not done)
+    def MoveCursor(self, where):
+        self.__dict__.setdefault("scrolls", []).append(("cursor", where))
+
+    def EnsureCursorVisible(self):
+        self.__dict__.setdefault("scrolls", []).append(("ensure", None))
+
+    def ScrollToAnchor(self, name):
+        self.__dict__.setdefault("scrolls", []).append(("anchor", name))
+
+    def SetFocus(self):
+        self.__dict__["focused"] = True
+
     # Tree
     def SetHeaderLabels(self, labels):
         self.__dict__["header"] = list(labels)
 
     def Clear(self):
         self.rows.clear()
+        if self.kind == "TextEdit":
+            self.props["PlainText"] = ""
 
     def NewItem(self):
         return TreeItem()

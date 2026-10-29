@@ -24,6 +24,7 @@ import webbrowser
 
 from . import ops as ops_module
 from . import paths
+from .chat import AgentChat
 from .core import DEFAULT_API_URL, PLUGIN_VERSION
 from .core.api import ApiClient, normalize_base_url
 from .core.auth import DeviceLogin, LoginCancelled, LoginError
@@ -123,6 +124,7 @@ class Controller:
         self._last_alive = time.monotonic()
         self.on_approval = None  # set by the window: called with each new request
         self.resolve_gone = False
+        self.chat = AgentChat(self)
         global current
         current = self
 
@@ -181,6 +183,44 @@ class Controller:
         if self.env_token:
             return self.env_email
         return self.settings.get("account_email")
+
+    # ---------------------------------------------------------- chat
+
+    def chat_api(self):
+        """The API client for the window's chat: the connected one, while
+        signed in."""
+        return self.api if self.api is not None and self.signed_in else None
+
+    def instance_id(self):
+        """This install's instance id while connected (the chat's pin)."""
+        return self.lease.instance_id if self.lease is not None else None
+
+    def chat_blocker(self):
+        """Why the chat cannot send right now, with the one click that fixes
+        it, or None. NOLGIA Agent reaches this Resolve only while it is
+        connected and Allow NOLGIA Agent is on."""
+        if not self.signed_in or self.login is not None:
+            return None
+        if not self.connected or self.lease is None:
+            return {"kind": "connect", "label": "Turn on Connected",
+                    "text": "Turn on Connected so NOLGIA Agent can work in this DaVinci Resolve."}
+        if not self.setting("allow_agent"):
+            return {"kind": "allow_agent", "label": "Allow NOLGIA Agent",
+                    "text": "NOLGIA Agent can work here only while Allow NOLGIA Agent is on."}
+        return None
+
+    def fix_chat_blocker(self):
+        blocker = self.chat_blocker()
+        if blocker is None:
+            return
+        if blocker["kind"] == "connect":
+            self.connect()
+        elif blocker["kind"] == "allow_agent":
+            self.set_setting("allow_agent", True)
+
+    def chat_auth_failed(self, text):
+        """The chat's sign in was refused (401): as the worker's."""
+        self._auth_failed(text)
 
     # ---------------------------------------------------------- status
 
@@ -262,6 +302,7 @@ class Controller:
         self.worker.start()
         if self.has_window:
             self.settings.update(connected=True)
+            self.chat.start()
         self.clean_exit = True
         if not self.account_email():
             self._fetch_email(api)
@@ -318,6 +359,7 @@ class Controller:
             self.env_token = None
         else:
             self.settings.update(token="", account_email="", token_expires_at=0.0)
+        self.chat.reset(forget=False)
         self.disconnect()
         self.message = text
 
@@ -386,6 +428,7 @@ class Controller:
         self.settings.update(token=token.access_token, token_api_url=base_url, account_email=token.email or "",
                              token_expires_at=float(token.expires_at or 0))
         self.log("Signed in%s." % (" as %s" % token.email if token.email else ""))
+        self.chat.reset(forget=False)
         self.connect()
 
     def sign_out(self):
@@ -393,6 +436,7 @@ class Controller:
         self.disconnect("You signed out of NOLGIA in DaVinci Resolve before this ran.")
         self.env_token = None
         self.settings.update(token="", token_api_url="", account_email="", token_expires_at=0.0, connected=False)
+        self.chat.reset()
         self.message = "Signed out."
         self.bump()
 
@@ -498,6 +542,8 @@ class Controller:
                 self.log("A NOLGIA task failed:\n" + traceback.format_exc())
         if self.executor.pump():
             self.bump()
+        if self.has_window:
+            self.chat.tick()
         if self.worker is not None:
             if time.monotonic() - self._last_snapshot > 1.0:
                 self.update_snapshot()
