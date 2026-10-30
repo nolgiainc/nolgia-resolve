@@ -80,6 +80,20 @@ class DitTest(unittest.TestCase):
             self.assertIn("copy 2 files", request.title)
             self.assertTrue(any("Nothing at a destination is replaced" in l for l in request.lines))
 
+    def test_sizes_read_as_the_cli_writes_them(self):
+        # The owner's Mac test 3: the plan said card B001 held "601500 bytes".
+        cases = {0: "0 B", 512: "512 B", 999: "999 B", 1000: "1.0 KB", 601500: "601.5 KB", 9300000: "9.3 MB",
+                 999949999: "999.9 MB", 2500000000: "2.50 GB", 3210000000000: "3.21 TB"}
+        for size, text in cases.items():
+            self.assertEqual(dit._size(size), text)
+
+    def test_the_offload_plan_has_no_raw_byte_counts(self):
+        with Env(NOLGIA_CLI=FAKE, FAKE_CONFLICT=None):
+            cmd = FakeCommand({"subcommand": "offload", "sources": ["/cards/A001"], "destinations": ["/drives/one"]})
+            request = self.ops().dit_approval(cmd, ops_module.prepare_dit(cmd))
+            for line in [request.title] + request.lines:
+                self.assertNotIn("bytes", line)
+
     def test_read_only_work_needs_no_approval(self):
         with Env(NOLGIA_CLI=FAKE):
             cmd = FakeCommand({"subcommand": "verify", "dir": "/drives/one/SHOOT/A001"})

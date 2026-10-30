@@ -437,6 +437,8 @@ def main():
             assert res["value"] == 42, res
             log = window_log()
             assert "Asked the person: Your agent wants to run Python in DaVinci Resolve." in log, log[-2000:]
+            # The button is off for REQUEST_ARM_SECONDS after the request shows; the click after that answered it.
+            assert "The person clicked Run code for request " in log, log[-2000:]
             expect_ok(caller.command("run", {"code":
                 "from nolgia_resolve import panel\npanel.current.controller.set_setting('ask_before_run', False)"}))
 

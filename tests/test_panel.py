@@ -51,6 +51,12 @@ class PanelTest(unittest.TestCase):
             time.sleep(0.02)
         self.fail("timed out; status: %s" % self.controller.status_line())
 
+    def wait_for_buttons(self, request):
+        """Let REQUEST_ARM_SECONDS pass; the next tick turns the buttons on."""
+        time.sleep(panel_module.REQUEST_ARM_SECONDS)
+        self.disp.tick(panel_module.TIMER_ID)
+        self.assertTrue(request.Find("Approve").Enabled and request.Find("Deny").Enabled)
+
     def sign_in(self):
         self.win.fire("SignIn")
         self.tick_until(lambda: self.controller.connected and self.controller.worker.state == "connected"
@@ -103,6 +109,91 @@ class PanelTest(unittest.TestCase):
     def test_the_minimum_size_is_set_again_once_shown(self):
         self.panel._set_min_size()
         self.assertEqual(self.win.MinimumSize, [panel_module.MIN_WIDTH, panel_module.MIN_HEIGHT])
+
+    def _request(self, command_id, label="Copy and verify"):
+        from nolgia_resolve.core.mainthread import ApprovalRequest, PendingApproval
+
+        class Command:
+            id = command_id
+            deadline = time.monotonic() + 600
+
+        class Ticket:
+            command = Command
+
+        pending = PendingApproval(Ticket(), ApprovalRequest("Your NOLGIA Agent wants to copy 2 files", ["Copy 2 files"],
+                                                            "n/a", approve_label=label))
+        self.controller.executor.approvals.append(pending)
+        return pending
+
+    def test_the_request_buttons_are_never_default_and_never_take_focus(self):
+        # Return and Space never answer a request: no default button, no focus.
+        self._request("cmd-1")
+        self.panel.show_request()
+        for bid in ("Approve", "Deny"):
+            props = self.panel.request_win.Find(bid).props
+            self.assertIs(props["AutoDefault"], False)
+            self.assertIs(props["Default"], False)
+            self.assertEqual(props["FocusPolicy"], {"NoFocus": True})
+
+    def test_a_click_as_the_request_opens_is_never_an_answer(self):
+        # The owner's Mac test 3: request 74b78e66 was approved about 3 s after
+        # it showed, with the pointer resting where its button appears.
+        pending = self._request("cmd-dit")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.assertFalse(request.Find("Approve").Enabled)
+        self.assertFalse(request.Find("Deny").Enabled)
+        request.fire("Approve")
+        request.fire("Deny")
+        self.disp.tick(panel_module.TIMER_ID)
+        self.assertIsNone(pending.decision)
+        self.assertTrue(request.shown)
+        self.assertEqual(sum("Ignored a click" in line for line in self.lines), 2)
+        time.sleep(panel_module.REQUEST_ARM_SECONDS / 2)
+        self.disp.tick(panel_module.TIMER_ID)
+        self.assertFalse(request.Find("Approve").Enabled, "still off half way")
+        request.fire("Approve")
+        self.assertIsNone(pending.decision)
+
+    def test_once_armed_a_click_answers_that_request(self):
+        pending = self._request("cmd-dit")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        request.fire("Approve")
+        self.assertIs(pending.decision, True)
+        self.assertFalse(request.shown)
+        self.assertIn("The person clicked Copy and verify for request cmd-dit.", self.lines)
+
+    def test_an_answer_goes_only_to_the_request_its_buttons_were_on_for(self):
+        first = self._request("cmd-a", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        # cmd-a goes (it ran out of time), cmd-b takes its place: the buttons
+        # go off again, and a click meant for cmd-a never answers cmd-b.
+        self.controller.executor.approvals.remove(first)
+        second = self._request("cmd-b")
+        self.panel.show_request()
+        self.assertFalse(request.Find("Approve").Enabled)
+        request.fire("Approve")
+        self.assertIsNone(first.decision)
+        self.assertIsNone(second.decision)
+        self.wait_for_buttons(request)
+        request.fire("Deny")
+        self.assertIs(second.decision, False)
+        self.assertIsNone(first.decision)
+        self.assertIn("The person clicked Deny for request cmd-b.", self.lines)
+
+    def test_a_closed_request_window_answers_nothing(self):
+        pending = self._request("cmd-dit")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        request.fire(panel_module.REQUEST_ID, "Close")
+        request.fire("Approve")  # a click that was already on its way
+        self.assertIsNone(pending.decision)
+        self.assertFalse(request.Find("Approve").Enabled)
 
     def test_a_plain_request_is_shown_as_text_not_code(self):
         # The owner's Mac test 2: the DIT copy's plan was coloured like Python.
@@ -215,8 +306,15 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(self.item("Waiting").Text, "1 request waiting for you.")
         self.assertEqual(self.item("Status").Text, "Waiting for you to approve a request.")
         self.assertTrue(request.shown)
+        self.assertFalse(request.Find("Approve").Enabled)
+        request.fire("Approve")  # a click as the window opens is no answer
+        self.disp.tick(panel_module.TIMER_ID)
+        self.assertEqual([p.id for p in self.controller.executor.approvals], [first])
+        self.assertIn("Ignored a click on Run code that came before the request's buttons were on.", self.lines)
+        self.wait_for_buttons(request)
         request.fire("Approve")
         self.tick_until(lambda: self.status_of(first)["status"] == "succeeded")
+        self.assertIn("The person clicked Run code for request %s." % first, self.lines)
         self.assertEqual(self.status_of(first)["result"]["value"], 42)
         self.assertFalse(request.shown)
 
@@ -230,6 +328,8 @@ class PanelTest(unittest.TestCase):
         self.assertTrue(self.visible("Review"))
         self.win.fire("Review")
         self.assertTrue(request.shown)
+        self.assertFalse(request.Find("Deny").Enabled, "showing it again turns the buttons off again")
+        self.wait_for_buttons(request)
         request.fire("Deny")
         self.tick_until(lambda: self.status_of(second)["status"] == "failed")
         self.assertEqual(self.status_of(second)["error"], "The person at DaVinci Resolve clicked Deny, so this did not run.")

@@ -110,6 +110,9 @@ Settings in the NOLGIA window:
 - **Ask before running code**: show every piece of Python NOLGIA wants to run
   in a NOLGIA request window and wait for you to click Run code or Deny.
   Closing that window leaves the request waiting (Show request brings it back).
+  Its buttons turn on 1 second after a request shows, and only a click
+  answers: Return and Space never do, and a click counts only for the request
+  shown when the buttons turned on.
 - **Sign out**: disconnect and forget the sign in on this computer.
 
 The sign in and the switches are kept in `settings.json` in a NOLGIA folder
@@ -276,6 +279,22 @@ the project since it was last saved.
   stays as it was before 0.2.3.
 
 ## Tested on
+
+0.2.6 (October 29, 2026), from the owner's third Mac test, where a DIT copy
+request was approved about 3 s after the NOLGIA request window opened with
+nobody clicking: the request window's buttons stay off for 1 s each time a
+request shows (a press on a button that is off never becomes a click, even
+if the release comes later), neither button is a default button or takes
+keyboard focus, and an answer counts only for the request the buttons were
+turned on for; every answer is logged with its request. Sizes in a DIT plan
+read as the CLI writes them (601.5 KB, 9.3 MB, not "601500 bytes"). Checked in
+Resolve Studio 21.1.1 on Windows 11 with window messages posted to the
+request window (mouse presses and releases at its Copy and verify button,
+Return and Space): 0.2.5 approved a click 0.3 s after the window opened, a
+press at 0.3 s released at 1.5 s, and Space once an earlier click had left
+the reused button with keyboard focus; 0.2.6 approved none of these and did
+approve a click 1.5 s after the window opened. Return approved neither.
+Unit tests and the in-app test (12/12). On macOS it waits for its re-test.
 
 0.2.5 (October 29, 2026): the NOLGIA window finishes Resolve's quit only
 when it closes less than 0.5 s after Resolve's new Untitled Project opens
