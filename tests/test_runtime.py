@@ -321,3 +321,59 @@ class SignIn(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HeldUp(unittest.TestCase):
+    """N1 (the owner's Mac test 5): a command read just after DaVinci Resolve
+    held the plugin up counts its time from the hold up's start, so one whose
+    time ran out meanwhile never runs late."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="nolgia-heldup-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.lines = []
+        self.controller = Controller(fake.sample(), env={"NOLGIA_CONFIG_DIR": self.tmp, "NOLGIA_KEEPER": "0"},
+                                     log=self.lines.append)
+
+    def ticket(self, timeout=60):
+        from nolgia_resolve.core.commands import Command
+        from nolgia_resolve.core.mainthread import Ticket
+
+        return Ticket(Command({"id": "cmd-1", "kind": "info", "timeout_seconds": timeout}))
+
+    def test_a_command_whose_time_ran_out_while_held_up_does_not_run(self):
+        ticket = self.ticket(timeout=60)
+        now = time.monotonic()
+        self.controller.note_stall(now - 120, now - 0.5)
+        self.assertIsNone(self.controller._needs_approval(ticket))
+        self.assertAlmostEqual(ticket.command.received_at, now - 120, delta=0.01)
+        ok, result, error = self.controller._run_ticket(ticket)
+        self.assertFalse(ok)
+        self.assertEqual(error, "This ran out of time before DaVinci Resolve could run it (Resolve runs no script "
+                                "while it plays), so it did not run.")
+        self.assertIn("Command info (cmd-1) ran out of time before DaVinci Resolve could run it; it did not run.",
+                      self.lines)
+
+    def test_a_command_with_time_left_after_a_hold_up_runs(self):
+        ticket = self.ticket(timeout=60)
+        now = time.monotonic()
+        self.controller.note_stall(now - 10, now - 0.5)
+        self.controller._needs_approval(ticket)
+        self.assertGreater(ticket.command.remaining(), 30)
+        ok, result, error = self.controller._run_ticket(ticket)
+        self.assertTrue(ok, error)
+
+    def test_a_command_read_long_after_a_hold_up_keeps_its_time(self):
+        ticket = self.ticket(timeout=60)
+        now = time.monotonic()
+        self.controller.note_stall(now - 120, now - 30)
+        self.controller._needs_approval(ticket)
+        self.assertGreater(ticket.command.received_at, now - 1)
+
+    def test_serve_notes_its_own_hold_ups(self):
+        self.controller.tick()
+        self.controller._tick_done_at -= 5
+        self.controller.tick()
+        self.assertEqual(len(self.controller.stalls), 1)
+        start, end = self.controller.stalls[0]
+        self.assertGreaterEqual(end - start, 5)

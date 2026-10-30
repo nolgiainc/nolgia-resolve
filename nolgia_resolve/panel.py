@@ -56,6 +56,65 @@ REQUEST_ARM_SECONDS = 1.0
 REQUEST_BUTTON = {"AutoDefault": False, "Default": False, "FocusPolicy": {"NoFocus": True},
                   "Events": {"Clicked": True, "Pressed": True, "Released": True}}
 REQUEST_OFF_STYLE = "QPushButton { color: #5f5f5f; }"
+# Keys stay in NOLGIA's windows (the owner's Mac test 5, 2026-10-30: with the
+# request window in front, Return then Space started Resolve's playback).
+# Resolve's shortcuts take a key unless the element with the keyboard focus is
+# one you type into, and a window that is shown or clicked gives its focus to
+# its first element that takes focus. In 0.2.8's request window that was the
+# code, which is read only, so keys went on to Resolve (Resolve Studio 21.1.1
+# on Windows: a J sent to such a window played the timeline backwards). So in
+# both windows nothing takes the focus but the chat box and a key catcher
+# (KEY_CATCHER): a box one pixel square that takes every key typed there and
+# forgets it at once. The catcher keeps from Resolve what any box you type in
+# keeps: letters, digits, Space, Return, the arrows, Home, End, Tab, Backspace
+# and Delete, and the editing shortcuts (copy, paste, undo and the like).
+# Escape, the function keys and Resolve's own Command or Control shortcuts
+# still reach Resolve, as they do from any text box in it.
+NO_FOCUS = {"NoFocus": True}
+KEY_CATCHER = {"PlainText": "", "Weight": 0, "MaximumSize": [1, 1],
+               "StyleSheet": "QTextEdit { border: none; background: transparent; color: transparent; }"}
+KEPT_KEYS_LOG_SECONDS = 60.0
+# DaVinci Resolve runs no script while it plays (the owner's Mac test 5): every
+# call into it waits until playback stops, and so do this window's events. Resolve
+# keeps them meanwhile (every 50 ms timer event and every click) and hands them
+# over in order once playback stops, so a click made during playback arrives
+# seconds or minutes late (there: a Deny from 5 minutes before, and one that
+# landed on Pause and switched NOLGIA off). Resolve Studio 21.1.1 on Windows,
+# measured: 22 s of playback, then 440 kept timer events and a click from its
+# middle, all within 0.2 s of the stop.
+#
+# Each event says when it happened (ev["when"], seconds; on Windows the very
+# clock of time.monotonic()). Its offset from that clock is the least lag any
+# event came with; should that clock move (lags steady at more than
+# CLOCK_MOVE_SECONDS over it for CLOCK_MOVE_AFTER seconds of timer events at
+# the timer's pace, where kept ones would get ever less late), the offset
+# follows. So:
+# - a click more than CLICK_LATE_SECONDS old does not count: it is logged and
+#   the person clicks again; a press counts only if it happened after the
+#   request's buttons were on;
+# - a timer event more than EVENT_LATE_SECONDS old does no work (at most one
+#   full tick every FULL_TICK_EVERY seconds), so the kept ones are through in
+#   moments and a fresh click is not stuck behind them;
+# - once the window was held up for more than STALL_SECONDS (no event for that
+#   long, or one event that long) a request's buttons go off again for
+#   REQUEST_ARM_SECONDS, and no click counts for STALE_CLICK_SECONDS.
+# For an event with no time, the last rule decides, and timer events less than
+# CATCH_UP_SECONDS apart just after a hold up count as kept ones.
+STALL_SECONDS = 1.0
+STALE_CLICK_SECONDS = 1.0
+CLICK_LATE_SECONDS = 1.0
+EVENT_LATE_SECONDS = 0.25
+FULL_TICK_EVERY = 5.0
+CLOCK_MOVE_SECONDS = 1.0
+CLOCK_MOVE_AFTER = 10.0
+CLOCK_STEADY_SECONDS = 0.5
+TIMER_PACE_SECONDS = 0.04
+CATCH_UP_SECONDS = 0.02
+# Each hold up of STALL_LOG_SECONDS or more is logged; shorter ones (a slow
+# moment, or timers slowed while the window is out of sight) at most once in
+# STALL_LOG_EVERY seconds, with a count.
+STALL_LOG_SECONDS = 5.0
+STALL_LOG_EVERY = 30.0
 FOOTER = "NOLGIA works in this DaVinci Resolve while this window is open and Connected is on."
 # Sizing, measured in Resolve 21.1.1: a UIManager window takes the width of
 # the widest Weight-0 child of its VGroup and cannot be dragged wider (its
@@ -201,6 +260,17 @@ class Panel:
         self._project_changed_at = None
         self._project_is_new = False
         self._finish_quit = False
+        self._handled_at = None
+        self._handling = 0
+        self._clicks_from = 0.0
+        self._last_tick_at = None
+        self._kept_keys_logged = {}
+        self._stall_logged_at = -STALL_LOG_EVERY
+        self._stalls_unlogged = 0
+        self._clock_offset = None
+        self._clock_moved = []
+        self._full_tick_at = 0.0
+        self._request_on_at = None
         global current
         current = self
 
@@ -219,41 +289,43 @@ class Panel:
             ui.Label({"ID": "CodeHint", "Text": "", "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
             ui.HGroup({"Weight": 0}, [
-                ui.Button({"ID": "SignIn", "Text": "Sign in"}),
-                ui.Button({"ID": "OpenPage", "Text": "Open page again"}),
-                ui.Button({"ID": "CancelSignIn", "Text": "Cancel"}),
-                ui.Button({"ID": "SignOut", "Text": "Sign out"}),
+                ui.Button({"ID": "SignIn", "Text": "Sign in", "FocusPolicy": NO_FOCUS}),
+                ui.Button({"ID": "OpenPage", "Text": "Open page again", "FocusPolicy": NO_FOCUS}),
+                ui.Button({"ID": "CancelSignIn", "Text": "Cancel", "FocusPolicy": NO_FOCUS}),
+                ui.Button({"ID": "SignOut", "Text": "Sign out", "FocusPolicy": NO_FOCUS}),
             ]),
-            ui.CheckBox({"ID": "Connected", "Text": "Connected", "Weight": 0,
+            ui.CheckBox({"ID": "Connected", "Text": "Connected", "Weight": 0, "FocusPolicy": NO_FOCUS,
                          "ToolTip": "Let NOLGIA send commands to this DaVinci Resolve. Turn off to pause."}),
-            ui.CheckBox({"ID": "AllowAgent", "Text": "Allow NOLGIA Agent", "Weight": 0,
+            ui.CheckBox({"ID": "AllowAgent", "Text": "Allow NOLGIA Agent", "Weight": 0, "FocusPolicy": NO_FOCUS,
                          "ToolTip": "Let your NOLGIA Agent in the cloud work here too, not only the agent apps "
                                     "you run yourself (Claude, ChatGPT and others)."}),
-            ui.CheckBox({"ID": "AskBeforeRun", "Text": "Ask before running code", "Weight": 0,
+            ui.CheckBox({"ID": "AskBeforeRun", "Text": "Ask before running code", "Weight": 0, "FocusPolicy": NO_FOCUS,
                          "ToolTip": "Show each piece of Python NOLGIA wants to run and wait for you to approve it."}),
             ui.HGroup({"Weight": 0}, [
                 ui.Label({"ID": "Waiting", "Text": "", "WordWrap": True}),
-                ui.Button({"ID": "Review", "Text": "Show request", "Weight": 0}),
+                ui.Button({"ID": "Review", "Text": "Show request", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ]),
             # The NOLGIA Agent chat: what the person types goes to their NOLGIA
             # Agent, which works in this Resolve (chat.py).
             ui.HGroup({"Weight": 0}, [
                 ui.Label({"ID": "ChatTitle", "Text": "NOLGIA Agent", "Font": bold}),
                 ui.HGap(0, 1),
-                ui.Button({"ID": "NewChat", "Text": "New chat", "Weight": 0}),
+                ui.Button({"ID": "NewChat", "Text": "New chat", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ]),
             ui.Label({"ID": "ChatIntro", "Text": "Tell NOLGIA Agent what to do in this DaVinci Resolve. Try one of these:",
                       "WordWrap": True, "Weight": 0, "MinimumSize": [0, FOOTER_LINES_PX],
                       "Alignment": {"AlignTop": True, "AlignLeft": True}}),
         ] + [
-            ui.Button({"ID": "Example%d" % i, "Text": short, "Weight": 0, "ToolTip": full})
+            ui.Button({"ID": "Example%d" % i, "Text": short, "Weight": 0, "ToolTip": full, "FocusPolicy": NO_FOCUS})
             for i, (short, full) in enumerate(chatview.EXAMPLES)
         ] + [
-            ui.TextEdit({"ID": "Thread", "ReadOnly": True, "Weight": 3}),
+            ui.TextEdit({"ID": "Thread", "ReadOnly": True, "Weight": 3, "FocusPolicy": NO_FOCUS}),
             # A question's answers, two to a row (hidden while a notice shows:
             # the person can always type the answer instead).
-            ui.HGroup({"Weight": 0}, [ui.Button({"ID": "Option0", "Text": ""}), ui.Button({"ID": "Option1", "Text": ""})]),
-            ui.HGroup({"Weight": 0}, [ui.Button({"ID": "Option2", "Text": ""}), ui.Button({"ID": "Option3", "Text": ""})]),
+            ui.HGroup({"Weight": 0}, [ui.Button({"ID": "Option0", "Text": "", "FocusPolicy": NO_FOCUS}),
+                                      ui.Button({"ID": "Option1", "Text": "", "FocusPolicy": NO_FOCUS})]),
+            ui.HGroup({"Weight": 0}, [ui.Button({"ID": "Option2", "Text": "", "FocusPolicy": NO_FOCUS}),
+                                      ui.Button({"ID": "Option3", "Text": "", "FocusPolicy": NO_FOCUS})]),
             ui.Label({"ID": "ChatWorking", "Text": "", "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
             # One notice at a time, with the one click that helps: what keeps the
@@ -261,25 +333,27 @@ class Panel:
             # else what NOLGIA answered (out of credits, no agent yet...).
             ui.Label({"ID": "ChatNotice", "Text": "", "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
-            ui.Button({"ID": "ChatAction", "Text": "", "Weight": 0}),
+            ui.Button({"ID": "ChatAction", "Text": "", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ui.TextEdit({"ID": "Box", "Weight": 0, "PlaceholderText": "Ask NOLGIA Agent to make or change something here",
                          "MaximumSize": [16777215, BOX_PX]}),
             ui.HGroup({"Weight": 0}, [
-                ui.Button({"ID": "Stop", "Text": "Stop", "Weight": 0}),
+                ui.Button({"ID": "Stop", "Text": "Stop", "Weight": 0, "FocusPolicy": NO_FOCUS}),
                 ui.HGap(0, 1),
-                ui.Button({"ID": "OpenWeb", "Text": "Open on nolgia.ai", "Weight": 0,
+                ui.Button({"ID": "OpenWeb", "Text": "Open on nolgia.ai", "Weight": 0, "FocusPolicy": NO_FOCUS,
                            "ToolTip": "This chat on nolgia.ai, in your browser."}),
-                ui.Button({"ID": "Send", "Text": "Send", "Weight": 0}),
+                ui.Button({"ID": "Send", "Text": "Send", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ]),
             ui.Label({"ID": "ChatCost", "Text": "", "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, COST_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
             ui.HGroup({"Weight": 0}, [
                 ui.Label({"Text": "Activity", "Font": bold}),
                 ui.HGap(0, 1),
-                ui.Button({"ID": "Pause", "Text": "Pause", "Weight": 0}),
+                ui.TextEdit(dict(KEY_CATCHER, ID="KeyCatcher")),
+                ui.Button({"ID": "Pause", "Text": "Pause", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ]),
             ui.Tree({"ID": "Activity", "Weight": 1, "RootIsDecorated": False, "AlternatingRowColors": True,
-                     "SelectionMode": "NoSelection", "MaximumSize": [16777215, ACTIVITY_MAX_PX]}),
+                     "SelectionMode": "NoSelection", "MaximumSize": [16777215, ACTIVITY_MAX_PX],
+                     "FocusPolicy": NO_FOCUS}),
             ui.Label({"ID": "Footer", "Text": FOOTER, "WordWrap": True, "Weight": 0,
                       "MinimumSize": [0, FOOTER_LINES_PX], "Alignment": {"AlignTop": True, "AlignLeft": True}}),
         ])
@@ -294,28 +368,30 @@ class Panel:
             tree.ColumnWidth[column] = width
         on = self.win.On
         on[WINDOW_ID].Close = self._on_close
-        on.SignIn.Clicked = self._guard(lambda ev: self.controller.sign_in())
-        on.OpenPage.Clicked = self._guard(lambda ev: self.controller.open_sign_in_page())
-        on.CancelSignIn.Clicked = self._guard(lambda ev: self.controller.cancel_sign_in())
-        on.SignOut.Clicked = self._guard(lambda ev: self.controller.sign_out())
-        on.Connected.Clicked = self._guard(self._on_connected)
-        on.AllowAgent.Clicked = self._guard(
-            lambda ev: self.controller.set_setting("allow_agent", bool(self.items["AllowAgent"].Checked)))
-        on.AskBeforeRun.Clicked = self._guard(
-            lambda ev: self.controller.set_setting("ask_before_run", bool(self.items["AskBeforeRun"].Checked)))
-        on.Pause.Clicked = self._guard(self._on_pause)
-        on.Review.Clicked = self._guard(lambda ev: self.show_request(force=True))
+        click = self._click
+        on.SignIn.Clicked = click("SignIn", lambda ev: self.controller.sign_in())
+        on.OpenPage.Clicked = click("OpenPage", lambda ev: self.controller.open_sign_in_page())
+        on.CancelSignIn.Clicked = click("CancelSignIn", lambda ev: self.controller.cancel_sign_in())
+        on.SignOut.Clicked = click("SignOut", lambda ev: self.controller.sign_out())
+        on.Connected.Clicked = click("Connected", self._on_connected)
+        on.AllowAgent.Clicked = click(
+            "AllowAgent", lambda ev: self.controller.set_setting("allow_agent", bool(self.items["AllowAgent"].Checked)))
+        on.AskBeforeRun.Clicked = click(
+            "AskBeforeRun", lambda ev: self.controller.set_setting("ask_before_run", bool(self.items["AskBeforeRun"].Checked)))
+        on.Pause.Clicked = click("Pause", self._on_pause)
+        on.Review.Clicked = click("Review", lambda ev: self.show_request(force=True))
         chat = self.controller.chat
-        on.Send.Clicked = self._guard(lambda ev: self._send_from_box())
-        on.Stop.Clicked = self._guard(lambda ev: chat.stop())
-        on.NewChat.Clicked = self._guard(lambda ev: chat.new_chat())
-        on.OpenWeb.Clicked = self._guard(lambda ev: self._open(chat.view()["session_url"] or AGENT_URL))
-        on.ChatAction.Clicked = self._guard(self._on_chat_action)
+        on.Send.Clicked = click("Send", lambda ev: self._send_from_box())
+        on.Stop.Clicked = click("Stop", lambda ev: chat.stop())
+        on.NewChat.Clicked = click("NewChat", lambda ev: chat.new_chat())
+        on.OpenWeb.Clicked = click("OpenWeb", lambda ev: self._open(chat.view()["session_url"] or AGENT_URL))
+        on.ChatAction.Clicked = click("ChatAction", self._on_chat_action)
         on.Box.TextChanged = self._guard(self._on_box_changed)
+        on.KeyCatcher.TextChanged = self._guard(lambda ev: self._kept_keys(self.items["KeyCatcher"], "window"))
         for i, (_short, full) in enumerate(chatview.EXAMPLES):
-            on["Example%d" % i].Clicked = self._guard(lambda ev, text=full: self._put_in_box(text))
+            on["Example%d" % i].Clicked = click("Example%d" % i, lambda ev, text=full: self._put_in_box(text))
         for i in range(OPTIONS):
-            on["Option%d" % i].Clicked = self._guard(lambda ev, n=i: self._on_option(n))
+            on["Option%d" % i].Clicked = click("Option%d" % i, lambda ev, n=i: self._on_option(n))
         self._start_timer()
         self.refresh(force=True)
         return self.win
@@ -335,17 +411,187 @@ class Panel:
         self.timer.Start()
 
     def _guard(self, fn):
+        """An event handler: a bug in it is logged, the window is redrawn
+        after it, and how long the window was held up before it or by it is
+        noted (STALL_SECONDS)."""
         def handler(ev):
+            start = time.monotonic()
+            outer = self._handling == 0
+            if outer:
+                if self._handled_at is not None and start - self._handled_at > STALL_SECONDS:
+                    self._held_up(self._handled_at, start)
+            self._handling += 1
             try:
                 fn(ev)
             except Exception:
                 self.log("The NOLGIA window hit a bug:\n" + traceback.format_exc())
+            finally:
+                self._handling -= 1
+            if outer:
+                end = time.monotonic()
+                if end - start > STALL_SECONDS:
+                    self._held_up(start, end)
+                self._handled_at = end
             self.refresh()
         return handler
+
+    def _click(self, element_id, fn):
+        """A click handler for an element of this window: a click that waited
+        while the window was held up does nothing (STALL_SECONDS)."""
+        def handler(ev):
+            if self._waited(ev):
+                self.log("Ignored a click on %s: it waited while DaVinci Resolve was busy." % self._name_of(element_id))
+                self.refresh(force=True)  # a switch shows what it is again
+                return
+            fn(ev)
+        return self._guard(handler)
+
+    # ------------------------------------------------------------- event times
+
+    @staticmethod
+    def _lag(ev):
+        """time.monotonic() minus the event's own time (ev["when"]), or None
+        when it has none."""
+        try:
+            when = ev["when"]
+        except Exception:
+            return None
+        if isinstance(when, bool) or not isinstance(when, (int, float)):
+            return None
+        return time.monotonic() - float(when)
+
+    def _age(self, ev, lag=None):
+        """How long ago the event happened (see CLICK_LATE_SECONDS), or None."""
+        lag = self._lag(ev) if lag is None else lag
+        if lag is None or self._clock_offset is None:
+            return None
+        return lag - self._clock_offset
+
+    def _learn_clock(self, now, lag, spacing):
+        """Learn the offset of the events' clock from a timer event's lag (see
+        CLICK_LATE_SECONDS): an event is never early, so the least lag seen is
+        the offset; and when lags stay put above it (CLOCK_MOVE_SECONDS) for
+        CLOCK_MOVE_AFTER seconds of timer events at the timer's pace, that
+        clock moved, and the offset follows."""
+        if lag is None:
+            return
+        if self._clock_offset is None or lag < self._clock_offset:
+            self._clock_offset = lag
+            self._clock_moved = []
+            return
+        moved = self._clock_moved
+        if lag <= self._clock_offset + CLOCK_MOVE_SECONDS or spacing is None or spacing < TIMER_PACE_SECONDS:
+            moved.clear()
+            return
+        moved.append((now, lag))
+        lags = [value for _, value in moved]
+        if max(lags) - min(lags) > CLOCK_STEADY_SECONDS:
+            del moved[:-1]
+            return
+        if now - moved[0][0] >= CLOCK_MOVE_AFTER:
+            self.log("The clock DaVinci Resolve stamps events with moved %.1f s; NOLGIA follows it."
+                     % (min(lags) - self._clock_offset))
+            self._clock_offset = min(lags)
+            moved.clear()
+
+    def _waited(self, ev):
+        """Whether a click waited while DaVinci Resolve held the window up: by
+        its own time when it has one, else by the last hold up."""
+        age = self._age(ev)
+        if age is not None and age > CLICK_LATE_SECONDS:
+            return True
+        return time.monotonic() < self._clicks_from
+
+    def _happened_at(self, ev):
+        """When the event happened, on time.monotonic()'s clock."""
+        age = self._age(ev)
+        now = time.monotonic()
+        return now - age if age is not None and age > 0 else now
+
+    def _name_of(self, element_id):
+        try:
+            return str(self.items[element_id].Text or element_id)
+        except Exception:
+            return element_id
+
+    def _held_up(self, start, end):
+        """The window could not answer from start to end (monotonic times):
+        no click counts until STALE_CLICK_SECONDS after, a request's buttons
+        go off again, and the controller counts the time of commands that
+        came in meanwhile from the start."""
+        self._clicks_from = max(self._clicks_from, end + STALE_CLICK_SECONDS)
+        self.controller.note_stall(start, end)
+        self._stalls_unlogged += 1
+        if end - start >= STALL_LOG_SECONDS or end - self._stall_logged_at >= STALL_LOG_EVERY:
+            more = self._stalls_unlogged - 1
+            self.log("The NOLGIA window was held up for %.1f s (DaVinci Resolve runs no script while it plays or is "
+                     "busy); clicks made meanwhile do not count.%s" % (
+                         end - start, (" (%d shorter hold up%s before this one.)" % (more, "" if more == 1 else "s"))
+                         if more else ""))
+            self._stall_logged_at = end
+            self._stalls_unlogged = 0
+        self._disarm_again(end)
+
+    def _disarm_again(self, now):
+        """After a hold up, a shown request's buttons look off again and take
+        no click until REQUEST_ARM_SECONDS after it."""
+        shown = self.request_shown
+        if shown is None or self.request_win is None:
+            return
+        was_on = self._request_armed_for == shown
+        self._request_armed_for = None
+        self._request_on_at = None
+        self._request_press = None
+        self._request_armed_at = max(self._request_armed_at or 0.0, now + REQUEST_ARM_SECONDS)
+        items = self.request_win.GetItems()
+        for bid in ("Approve", "Deny"):
+            try:
+                items[bid].StyleSheet = REQUEST_OFF_STYLE
+            except Exception:
+                pass
+        if was_on:
+            self.log("Approval buttons off again for request %s: DaVinci Resolve held the window up." % shown)
+
+    def _kept_keys(self, catcher, where):
+        """A key catcher (KEY_CATCHER) got keys: forget them, and say so in
+        the log now and then."""
+        try:
+            if not str(catcher.PlainText or ""):
+                return
+            catcher.PlainText = ""
+        except Exception:
+            return
+        now = time.monotonic()
+        if now - self._kept_keys_logged.get(where, -KEPT_KEYS_LOG_SECONDS) < KEPT_KEYS_LOG_SECONDS:
+            return
+        self._kept_keys_logged[where] = now
+        if where == "request":
+            self.log("Kept keys typed in the request window (request %s) from DaVinci Resolve; only a click answers "
+                     "a request." % self.request_shown)
+        else:
+            self.log("Kept keys typed in the NOLGIA window from DaVinci Resolve.")
 
     # ------------------------------------------------------------- events
 
     def _on_tick(self, ev):
+        now = time.monotonic()
+        last, self._last_tick_at = self._last_tick_at, now
+        spacing = None if last is None else now - last
+        lag = self._lag(ev)
+        self._learn_clock(now, lag, spacing)
+        age = self._age(ev, lag)
+        if age is not None:
+            kept = age > EVENT_LATE_SECONDS
+        else:
+            kept = spacing is not None and spacing < CATCH_UP_SECONDS and now < self._clicks_from
+        if kept and now - self._full_tick_at < FULL_TICK_EVERY:
+            # A timer event Resolve kept while it held the window up (see
+            # STALL_SECONDS): no work, and no click counts yet.
+            self._clicks_from = max(self._clicks_from, now + STALE_CLICK_SECONDS)
+            if self.request_shown is not None and self._request_armed_for is None and self._request_armed_at:
+                self._request_armed_at = max(self._request_armed_at, now + REQUEST_ARM_SECONDS)
+            return
+        self._full_tick_at = now
         self._ticks += 1
         if self._ticks == 1:
             self.log("The NOLGIA window is running (timer ticks).")
@@ -565,6 +811,10 @@ class Panel:
             win.Raise()
         except Exception:
             pass
+        try:
+            items["RequestKeys"].SetFocus()  # keys typed here stay here (KEY_CATCHER)
+        except Exception:
+            pass
         self.request_shown = first.id
         self._request_shown_at = time.monotonic()
         self._request_armed_at = self._request_shown_at + REQUEST_ARM_SECONDS
@@ -576,6 +826,7 @@ class Panel:
         REQUEST_ARM_SECONDS)."""
         self._request_armed_at = None
         self._request_armed_for = None
+        self._request_on_at = None
         self._request_press = None
         if items is None and self.request_win is not None:
             items = self.request_win.GetItems()
@@ -597,6 +848,7 @@ class Panel:
         for bid in ("Approve", "Deny"):
             items[bid].StyleSheet = ""
         self._request_armed_for = self.request_shown
+        self._request_on_at = time.monotonic()
         self.log("Approval buttons on for request %s at +%.1f s." % (
             self.request_shown, time.monotonic() - self._request_shown_at))
 
@@ -608,10 +860,11 @@ class Panel:
             ui.Label({"ID": "RequestTitle", "Text": "", "WordWrap": True, "Weight": 0,
                       "Font": ui.Font({"Bold": True})}),
             ui.TextEdit({"ID": "RequestCode", "PlainText": "", "ReadOnly": True, "Font": mono,
-                         "LineWrapMode": "NoWrap", "Lexer": "python", "Weight": 1}),
-            ui.TextEdit({"ID": "RequestText", "PlainText": "", "ReadOnly": True, "Weight": 1}),
+                         "LineWrapMode": "NoWrap", "Lexer": "python", "Weight": 1, "FocusPolicy": NO_FOCUS}),
+            ui.TextEdit({"ID": "RequestText", "PlainText": "", "ReadOnly": True, "Weight": 1, "FocusPolicy": NO_FOCUS}),
             ui.Label({"ID": "CodeNote", "Text": "Code runs on this computer with your permissions.", "Weight": 0}),
             ui.HGroup({"Weight": 0}, [
+                ui.TextEdit(dict(KEY_CATCHER, ID="RequestKeys")),
                 ui.HGap(0, 1),
                 ui.Button(dict(REQUEST_BUTTON, ID="Deny", Text="Deny")),
                 ui.Button(dict(REQUEST_BUTTON, ID="Approve", Text="Approve")),
@@ -623,7 +876,12 @@ class Panel:
         def pressed(bid):
             def handler(ev):
                 shown = self.request_shown
-                self._request_press = (bid, shown, shown is not None and self._request_armed_for == shown)
+                if self._waited(ev):
+                    self._request_press = None  # it waited while Resolve held the window up
+                    return
+                on_at = self._request_on_at
+                self._request_press = (bid, shown, shown is not None and self._request_armed_for == shown
+                                       and on_at is not None and self._happened_at(ev) >= on_at)
             return self._guard(handler)
 
         def decide(approve):
@@ -635,6 +893,15 @@ class Panel:
                 press, self._request_press = self._request_press, None
                 if shown is None:
                     self.log("Ignored a click on %s: no request was showing." % label)
+                    return
+                if self._waited(ev):
+                    self.log("Ignored a click on %s for request %s: it waited while DaVinci Resolve was busy." % (
+                        label, shown))
+                    return
+                pending = next((p for p in self.controller.executor.approvals if p.id == shown), None)
+                if pending is not None and time.monotonic() >= pending.ticket.command.deadline:
+                    self.log("Ignored a click on %s for request %s: the request had run out of time." % (label, shown))
+                    self.controller.bump()
                     return
                 why = None
                 if self._request_armed_for != shown:
@@ -662,6 +929,7 @@ class Panel:
         win.On.Deny.Pressed = pressed("Deny")
         win.On.Approve.Clicked = decide(True)
         win.On.Deny.Clicked = decide(False)
+        win.On.RequestKeys.TextChanged = self._guard(lambda ev: self._kept_keys(win.GetItems()["RequestKeys"], "request"))
         # Closing the request window leaves the request waiting in the NOLGIA window.
         win.On[REQUEST_ID].Close = self._guard(lambda ev: self._close_request())
         self.request_win = win
@@ -883,6 +1151,7 @@ class Panel:
         self.refresh(force=True)
         self.win.Show()
         self._set_min_size()
+        self._focus_keys()
         self._note_project()
         self.log("NOLGIA window open (plugin %s, DaVinci Resolve %s, Python %s at %s)."
                  % (_plugin_version(), ctl.ops.app_version(), sys.version.split()[0], sys.executable))
@@ -900,6 +1169,15 @@ class Panel:
             if self._finish_quit:
                 self._quit_resolve()
         return True
+
+    def _focus_keys(self):
+        """Give the keyboard to the chat box, or (signed out) the key catcher,
+        so a key typed in the window never reaches Resolve (KEY_CATCHER)."""
+        try:
+            target = "Box" if not self.items["Box"].Hidden else "KeyCatcher"
+            self.items[target].SetFocus()
+        except Exception:
+            pass
 
     def _quit_resolve(self):
         """Finish the quit Resolve gave up while this window was open."""

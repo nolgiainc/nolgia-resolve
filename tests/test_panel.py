@@ -52,10 +52,20 @@ class PanelTest(unittest.TestCase):
             time.sleep(0.02)
         self.fail("timed out; status: %s" % self.controller.status_line())
 
+    def ticks_for(self, seconds, clock=None):
+        """Tick as Resolve's timer does (every TICK_MS) for `seconds`; with
+        `clock`, each event carries its time on it, as Resolve 21.1.1's do."""
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            time.sleep(panel_module.TICK_MS / 1000.0)
+            if clock is None:
+                self.disp.tick(panel_module.TIMER_ID)
+            else:
+                self.disp.tick(panel_module.TIMER_ID, when=clock())
+
     def wait_for_buttons(self, request):
-        """Let REQUEST_ARM_SECONDS pass; the next tick turns the buttons on."""
-        time.sleep(panel_module.REQUEST_ARM_SECONDS)
-        self.disp.tick(panel_module.TIMER_ID)
+        """Let REQUEST_ARM_SECONDS pass, ticking; then the buttons are on."""
+        self.ticks_for(panel_module.REQUEST_ARM_SECONDS + 0.06)
         self.assertFalse(self.looks_off(request))
 
     @staticmethod
@@ -168,8 +178,7 @@ class PanelTest(unittest.TestCase):
         self.assertRegex(refused[0], r"^Ignored a click on Copy and verify for request cmd-dit: it came 0\.\d\d s "
                                      r"after the request showed, before its buttons were on\.$")
         self.assertRegex(refused[1], r"^Ignored a click on Deny for request cmd-dit: ")
-        time.sleep(panel_module.REQUEST_ARM_SECONDS / 2)
-        self.disp.tick(panel_module.TIMER_ID)
+        self.ticks_for(panel_module.REQUEST_ARM_SECONDS / 2)
         self.assertTrue(self.looks_off(request), "still off half way")
         self.click(request, "Approve")
         self.assertIsNone(pending.decision)
@@ -246,6 +255,209 @@ class PanelTest(unittest.TestCase):
         self.assertIsNone(pending.decision)
         self.assertTrue(self.looks_off(request))
         self.assertIn("Ignored a click on Copy and verify: no request was showing.", self.lines)
+
+    # --- N1 (the owner's Mac test 5): keys, and Resolve holding the window up
+
+    def test_keys_stay_in_the_windows(self):
+        # Space in the request window started Resolve's playback: its focus
+        # was on the code, which is read only. Now nothing in either window
+        # takes the focus but the chat box and a key catcher.
+        self._request("cmd-1", "Run code")
+        self.panel.show_request()
+        for win, typing in ((self.win, {"Box", "KeyCatcher"}), (self.panel.request_win, {"RequestKeys"})):
+            for element in win.layout.walk():
+                if element.kind in ("Button", "CheckBox", "Tree", "TextEdit") and element.props.get("ID") not in typing:
+                    self.assertEqual(element.props.get("FocusPolicy"), {"NoFocus": True}, element.props.get("ID"))
+            for eid in typing - {"Box"}:
+                catcher = win.Find(eid)
+                self.assertEqual(catcher.kind, "TextEdit")
+                self.assertFalse(catcher.props.get("ReadOnly"))
+                self.assertEqual(catcher.props["MaximumSize"], [1, 1])
+        self.assertTrue(self.panel.request_win.Find("RequestKeys").__dict__.get("focused"),
+                        "the request window's keys go to its catcher")
+
+    def test_keys_typed_in_the_request_window_are_forgotten_and_answer_nothing(self):
+        pending = self._request("cmd-1", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        for typed in ("\n", " ", "j"):
+            request.Find("RequestKeys").PlainText = typed
+            request.fire("RequestKeys", "TextChanged")
+            self.assertEqual(request.Find("RequestKeys").PlainText, "")
+        self.assertIsNone(pending.decision)
+        kept = [line for line in self.lines if line.startswith("Kept keys typed in the request window")]
+        self.assertEqual(kept, ["Kept keys typed in the request window (request cmd-1) from DaVinci Resolve; only a "
+                                "click answers a request."], "logged once a minute")
+        self.win.Find("KeyCatcher").PlainText = " "
+        self.win.fire("KeyCatcher", "TextChanged")
+        self.assertEqual(self.win.Find("KeyCatcher").PlainText, "")
+        self.assertIn("Kept keys typed in the NOLGIA window from DaVinci Resolve.", self.lines)
+
+    def held_up(self, seconds=20.0):
+        """As if DaVinci Resolve played for `seconds`: no event came."""
+        self.panel._handled_at -= seconds
+
+    def test_a_click_that_waited_while_resolve_played_never_answers(self):
+        # Mac test 5: Deny clicks from 23:16 were handled at 23:21:49.
+        pending = self._request("cmd-run", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        self.held_up()
+        self.click(request, "Approve")
+        self.click(request, "Deny")
+        self.assertIsNone(pending.decision)
+        self.assertTrue(request.shown)
+        self.assertTrue(self.looks_off(request), "the buttons go off again")
+        self.assertTrue(any(re.match(r"^The NOLGIA window was held up for 20\.\d s \(DaVinci Resolve runs no script "
+                                     r"while it plays or is busy\); clicks made meanwhile do not count\.$", line)
+                            for line in self.lines), self.lines)
+        self.assertIn("Approval buttons off again for request cmd-run: DaVinci Resolve held the window up.", self.lines)
+        self.assertIn("Ignored a click on Run code for request cmd-run: it waited while DaVinci Resolve was busy.",
+                      self.lines)
+        self.assertIn("Ignored a click on Deny for request cmd-run: it waited while DaVinci Resolve was busy.", self.lines)
+        self.wait_for_buttons(request)
+        self.click(request, "Approve")
+        self.assertIs(pending.decision, True, "a fresh click after that answers")
+
+    def test_a_click_that_waited_never_switches_nolgia_off(self):
+        # Mac test 5: a late click landed on Pause and switched NOLGIA off.
+        self.sign_in()
+        self.held_up(30.0)
+        self.win.fire("Pause")
+        self.assertTrue(self.controller.connected)
+        self.assertIn("Ignored a click on Pause: it waited while DaVinci Resolve was busy.", self.lines)
+        self.item("Connected").Checked = False  # the switch moved under the late click
+        self.win.fire("Connected")
+        self.assertTrue(self.controller.connected)
+        self.assertTrue(self.item("Connected").Checked, "the switch shows what it is again")
+        self.ticks_for(panel_module.STALE_CLICK_SECONDS + 0.1)
+        self.win.fire("Pause")
+        self.assertFalse(self.controller.connected, "a fresh click works")
+
+    def test_a_handler_held_up_inside_counts_too(self):
+        # A call into Resolve that waits while it plays holds the handler up.
+        pending = self._request("cmd-run", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        tick = self.controller.tick
+        self.controller.tick = lambda: (time.sleep(panel_module.STALL_SECONDS + 0.1), tick())
+        self.disp.tick(panel_module.TIMER_ID)
+        self.controller.tick = tick
+        self.click(request, "Approve")
+        self.assertIsNone(pending.decision)
+        self.assertIn("Ignored a click on Run code for request cmd-run: it waited while DaVinci Resolve was busy.",
+                      self.lines)
+
+    def test_timer_events_kept_while_held_up_do_no_work_and_keep_clicks_off(self):
+        self.ticks_for(0.2)
+        self.held_up()
+        ticks = self.panel._ticks
+        for _ in range(50):  # back to back, as kept ones would come
+            self.disp.tick(panel_module.TIMER_ID)
+        self.assertLessEqual(self.panel._ticks - ticks, 1, "kept timer events do no work")
+        self.assertGreater(self.panel._clicks_from, time.monotonic() + panel_module.STALE_CLICK_SECONDS - 0.2)
+
+    def test_a_request_that_ran_out_of_time_takes_no_click(self):
+        pending = self._request("cmd-old", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        pending.ticket.command.deadline = time.monotonic() - 1
+        self.click(request, "Approve")
+        self.assertIsNone(pending.decision)
+        self.assertIn("Ignored a click on Run code for request cmd-old: the request had run out of time.", self.lines)
+
+    # With event times (ev["when"]), as Resolve 21.1.1 gives them
+
+    def stamped_click(self, request, bid, when):
+        request.fire(bid, "Pressed", when=when)
+        request.fire(bid, "Clicked", when=when + 0.1)
+
+    def test_a_click_from_the_middle_of_playback_never_counts_however_late_it_comes(self):
+        # The proof in Resolve 21.1.1 on Windows: a click made during 75 s of
+        # playback reached the window 16 s after the stop, behind the timer
+        # events Resolve kept, and approved code in 0.2.8.
+        pending = self._request("cmd-run", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.ticks_for(panel_module.REQUEST_ARM_SECONDS + 0.2, clock=time.monotonic)
+        self.assertFalse(self.looks_off(request))
+        self.stamped_click(request, "Approve", time.monotonic() - 50)
+        self.assertIsNone(pending.decision)
+        self.assertIn("Ignored a click on Run code for request cmd-run: it waited while DaVinci Resolve was busy.",
+                      self.lines)
+        self.stamped_click(request, "Approve", time.monotonic())
+        self.assertIs(pending.decision, True)
+
+    def test_kept_timer_events_do_no_work_and_a_fresh_one_does(self):
+        self.ticks_for(0.3, clock=time.monotonic)
+        self.held_up(15.0)
+        ticks = self.panel._ticks
+        start = time.monotonic()
+        for i in range(280):  # 14 s of kept timer events, handed over at once
+            self.disp.tick(panel_module.TIMER_ID, when=start - 15 + i * 0.05)
+        self.assertLessEqual(self.panel._ticks - ticks, 1, "kept timer events do no work")
+        self.assertLess(time.monotonic() - start, 3.0, "and are through in moments")
+        time.sleep(0.05)
+        self.disp.tick(panel_module.TIMER_ID, when=time.monotonic())
+        self.assertGreater(self.panel._ticks, ticks + 0, "a fresh timer event works")
+
+    def test_a_press_made_before_the_buttons_were_on_never_counts_even_if_it_arrives_after(self):
+        pending = self._request("cmd-run", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.ticks_for(panel_module.REQUEST_ARM_SECONDS + 0.2, clock=time.monotonic)
+        on_at = self.panel._request_on_at
+        request.fire("Approve", "Pressed", when=on_at - 0.3)  # pressed while they looked off, seen after
+        request.fire("Approve", "Clicked", when=time.monotonic())
+        self.assertIsNone(pending.decision)
+        self.assertIn("Ignored a click on Run code for request cmd-run: the mouse button went down on it before the "
+                      "buttons were on.", self.lines)
+
+    def test_the_event_clock_may_run_from_another_start(self):
+        # On macOS the events' clock may not be time.monotonic()'s: the
+        # offset is learned from timer events that come at the timer's pace.
+        offset = 5000.0
+        pending = self._request("cmd-run", "Run code")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.ticks_for(panel_module.REQUEST_ARM_SECONDS + 0.3, clock=lambda: time.monotonic() + offset)
+        self.assertFalse(self.looks_off(request))
+        self.stamped_click(request, "Approve", time.monotonic() + offset - 9)
+        self.assertIsNone(pending.decision)
+        self.stamped_click(request, "Approve", time.monotonic() + offset)
+        self.assertIs(pending.decision, True)
+
+    def test_kept_timer_events_never_move_the_event_clock(self):
+        # Kept timer events get ever less late as they come; a clock that
+        # moved stays put. Only the second moves the offset.
+        self.ticks_for(0.3, clock=time.monotonic)
+        offset = self.panel._clock_offset
+        with mock.patch.object(panel_module, "CLOCK_MOVE_AFTER", 1.0):
+            start = time.monotonic()
+            self.ticks_for(1.5, clock=lambda: time.monotonic() - 15 + (time.monotonic() - start) * 0.6)
+            self.assertEqual(self.panel._clock_offset, offset)
+            self.ticks_for(1.5, clock=lambda: time.monotonic() - 30)
+        self.assertAlmostEqual(self.panel._clock_offset, 30, delta=0.3)
+        self.assertTrue(any(line.startswith("The clock DaVinci Resolve stamps events with moved 3") for line in self.lines),
+                        self.lines)
+
+    def test_a_main_window_click_from_during_playback_never_switches_off(self):
+        self.sign_in()
+        self.ticks_for(0.3, clock=time.monotonic)
+        self.win.fire("Pause", when=time.monotonic() - 40)
+        self.assertTrue(self.controller.connected)
+        self.assertIn("Ignored a click on Pause: it waited while DaVinci Resolve was busy.", self.lines)
+        self.win.fire("Pause", when=time.monotonic())
+        self.assertFalse(self.controller.connected)
+
+    def test_no_hold_up_in_steady_ticks(self):
+        self.ticks_for(1.5)
+        self.assertFalse(any("held up" in line for line in self.lines), self.lines)
+        self.assertLess(self.panel._clicks_from, time.monotonic())
 
     def test_a_plain_request_is_shown_as_text_not_code(self):
         # The owner's Mac test 2: the DIT copy's plan was coloured like Python.

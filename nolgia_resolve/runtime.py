@@ -11,6 +11,12 @@ UIManager timer calls `tick()`; without a window `serve()` does.
 A command that waits for Resolve (a render) waits on the worker thread and
 asks the main thread for each status check with `on_main()`, so the window
 keeps answering clicks while Resolve renders.
+
+While DaVinci Resolve plays it runs no script, and the threads here stop with
+the main thread (keeper.py says why). The keeper keeps the session live
+meanwhile, and a command that came in while the plugin was held up counts its
+time from when the hold up began (note_stall), so one that ran out meanwhile
+never runs late.
 """
 
 import os
@@ -24,6 +30,7 @@ import webbrowser
 
 from . import ops as ops_module
 from . import paths
+from .keeper import Keeper
 from .core import DEFAULT_API_URL, PLUGIN_VERSION
 from .core.api import ApiClient, normalize_base_url
 from .core.auth import DeviceLogin, LoginCancelled, LoginError
@@ -35,6 +42,13 @@ from .core.worker import BridgeWorker, Status
 from .settings import Log, Settings
 
 _TRUE = ("1", "true", "yes", "on")
+# A gap of more than STALL_SECONDS between ticks of serve() (or one tick that
+# long) is a hold up; the NOLGIA window notes its own (panel.STALL_SECONDS).
+STALL_SECONDS = 1.0
+# A command read up to STALL_SLACK_SECONDS after a hold up ended may have been
+# handed over at any time during it (the network threads were stopped too).
+STALL_SLACK_SECONDS = 2.0
+STALLS_KEPT = 20
 
 
 CA_BUNDLES = (
@@ -125,6 +139,9 @@ class Controller:
         self.on_approval = None  # set by the window: called with each new request
         self.resolve_gone = False
         self.chat = AgentChat(self)
+        self.stalls = []
+        self._tick_done_at = None
+        self.keeper = None if env_flag("NOLGIA_KEEPER", self.env) is False else Keeper(self.config_dir, self.log)
         global current
         current = self
 
@@ -292,6 +309,9 @@ class Controller:
             log=self.log,
         )
         self.worker.start()
+        if self.keeper is not None:
+            worker = self.worker
+            self.keeper.start(api.base_url, token, api.user_agent, worker.payload)
         if self.has_window:
             self.settings.update(connected=True)
             # The NOLGIA Agent chat in the window, pinned to this install.
@@ -331,6 +351,8 @@ class Controller:
         self._want_connect = False
         if remember and self.has_window:
             self.settings.update(connected=False)
+        if self.keeper is not None:
+            self.keeper.stop()  # before the worker closes the session
         if self.worker is not None and not self.worker.stopping:
             self.executor.close(reason)
             self.worker.stop()
@@ -338,6 +360,8 @@ class Controller:
         self.bump()
 
     def _worker_done(self):
+        if self.keeper is not None:
+            self.keeper.stop()
         if self.lease is not None:
             self.lease.release()
             self.lease = None
@@ -436,8 +460,27 @@ class Controller:
 
     # ------------------------------------------------------------ commands
 
+    def note_stall(self, start, end):
+        """The plugin was held up from start to end (time.monotonic()): no
+        thread ran (see keeper.py)."""
+        self.stalls.append((start, end))
+        del self.stalls[:-STALLS_KEPT]
+
+    def _count_from_stall(self, command):
+        """A command read just after a hold up may have been handed over at
+        any moment of it: count its time from the hold up's start."""
+        for start, end in reversed(self.stalls):
+            if start < command.received_at <= end + STALL_SLACK_SECONDS:
+                self.log("Command %s (%s) came in while DaVinci Resolve held the plugin up; its time counts from "
+                         "%.1f s before it was read." % (command.kind, command.id, command.received_at - start))
+                command.received_at = start
+                return
+
     def _needs_approval(self, ticket):
         command = ticket.command
+        self._count_from_stall(command)
+        if command.remaining() <= 0:
+            return None  # _run_ticket says it ran out of time; nobody is asked
         if command.kind == "run":
             return self.ops.run_approval(command, bool(self.setting("ask_before_run")))
         if command.kind == "open":
@@ -448,6 +491,11 @@ class Controller:
 
     def _run_ticket(self, ticket):
         command = ticket.command
+        if command.remaining() <= 0:
+            self.log("Command %s (%s) ran out of time before DaVinci Resolve could run it; it did not run."
+                     % (command.kind, command.id))
+            return False, None, ("This ran out of time before DaVinci Resolve could run it (Resolve runs no script "
+                                 "while it plays), so it did not run.")
         runner = getattr(self.ops, "do_" + command.kind, None)
         if runner is None:
             return False, None, "This plugin cannot do %s." % command.kind
@@ -525,6 +573,18 @@ class Controller:
             self.worker.request_heartbeat()
 
     def tick(self):
+        started = time.monotonic()
+        if not self.has_window and self._tick_done_at is not None and started - self._tick_done_at > STALL_SECONDS:
+            self.note_stall(self._tick_done_at, started)
+        try:
+            self._tick()
+        finally:
+            done = time.monotonic()
+            if not self.has_window and done - started > STALL_SECONDS:
+                self.note_stall(started, done)
+            self._tick_done_at = done
+
+    def _tick(self):
         while True:
             try:
                 event = self.events.get_nowait()
@@ -586,6 +646,8 @@ class Controller:
         self.closing = True
         self.cancel_sign_in()
         self.chat.close()
+        if self.keeper is not None:
+            self.keeper.stop()
         worker = self.worker
         if worker is not None:
             self.executor.close("DaVinci Resolve's NOLGIA window closed.")

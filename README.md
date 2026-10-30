@@ -18,7 +18,7 @@ on, and it lists every command it runs.
 A script plugin for DaVinci Resolve Studio 21.1 and newer (since 21.1 Resolve
 runs Python scripts only in the Studio edition). It needs Python 3.8 or
 newer and nothing outside Python's standard library. It is tested on
-Windows and macOS (0.2.1 on macOS 26.6.2 with Resolve Studio 21.1.1). It is
+Windows and macOS (0.2.8 on macOS 26.6.2 with Resolve Studio 21.1.1). It is
 written for Linux too, but has not been run there yet (see
 [Tested on](#tested-on)).
 
@@ -119,6 +119,21 @@ Settings in the NOLGIA window:
   no click on the buttons at all, so it never answers and has nothing to log.
 - **Sign out**: disconnect and forget the sign in on this computer.
 
+Keys stay in the NOLGIA windows: nothing in them takes the keyboard but the
+chat box and a one pixel box that takes every key typed there and forgets it.
+So Space, Return, letters, the arrows and the editing shortcuts never reach
+Resolve from there (in 0.2.8 Space in the request window started playback).
+Escape, the function keys and Resolve's other Command or Control shortcuts
+still reach Resolve, as from any text box in it. No key ever answers a
+request.
+
+While Resolve plays it runs no script (see Known limits), and a click made
+in a NOLGIA window meanwhile reaches the window only when playback stops.
+Each click says when it was made, so one more than a second old never counts:
+not on Run code or Deny, not on Pause or any switch. The log names each one,
+and the request's buttons look off again for a second after playback; click
+again then.
+
 The sign in and the switches are kept in `settings.json` in a NOLGIA folder
 for your user: `%APPDATA%\NOLGIA\resolve` on Windows,
 `~/Library/Application Support/NOLGIA/resolve` on macOS and
@@ -207,6 +222,7 @@ the project since it was last saved.
 | `NOLGIA_ASK_BEFORE_RUN=0/1` | set Ask before running code (for this run; not saved) |
 | `NOLGIA_ALLOW_AGENT=0/1` | set Allow NOLGIA Agent (for this run; not saved) |
 | `NOLGIA_INSTANCE_ID` | fixed session id for this Resolve |
+| `NOLGIA_KEEPER=0` | no keeper (see Known limits): while Resolve plays, NOLGIA may show this Resolve as not connected |
 | `NOLGIA_CONFIG_DIR` | where the settings, sign in and log are kept |
 | `NOLGIA_IMPORT_DIR` | where imported media is kept |
 | `NOLGIA_LUT_DIR` | the LUT folder to install into (Resolve must read it) |
@@ -255,6 +271,18 @@ the project since it was last saved.
   installed Python 3.11, not Resolve's own 3.14). The plugin needs Python
   3.8 or newer: its unit tests pass on 3.8, 3.9, 3.10 and 3.11, and it ran
   under 3.11 inside Resolve and under Resolve's own 3.14 with `--serve`.
+- Resolve runs no script while it plays: every call into it waits until
+  playback stops (in Resolve Studio 21.1.1 on Windows even a new connection
+  did), and the NOLGIA window waits with it, holding Python's lock, so the
+  plugin's own threads stop too. So a small helper program, the keeper,
+  runs beside the plugin (the same Python, through Resolve's own script
+  runner; it writes `keeper.py` in the NOLGIA folder to start it). When the
+  plugin has been held up for 5 seconds it sends the session's heartbeat
+  itself, so NOLGIA keeps showing this Resolve as connected. A command sent
+  meanwhile waits for it, and nothing runs until playback stops. A command
+  whose time ran out meanwhile does not run late; the plugin says so. The
+  keeper never asks for commands and never closes the session, and it ends
+  with the plugin. `NOLGIA_KEEPER=0` turns it off.
 - Resolve finds new scripts when it starts, so restart it after installing or
   updating.
 - Resolve does not finish a quit (DaVinci Resolve > Quit DaVinci Resolve,
@@ -284,6 +312,33 @@ the project since it was last saved.
 
 ## Tested on
 
+0.2.9 (October 30, 2026), from the owner's fifth Mac test, where Space in the
+request window started Resolve's playback and the plugin then answered
+nothing until it stopped: the session fell off NOLGIA's list, commands were
+refused as not connected, and clicks made meanwhile were handled minutes
+later (a Deny from 5 minutes before; one landed on Pause and switched NOLGIA
+off). Measured first in Resolve Studio 21.1.1 on Windows 11: while a
+timeline plays, every script call waits until it stops (a fresh connection
+too); a plain Python thread beside a UIManager window ran not once in 20.6 s
+of playback; and Resolve keeps every timer event and click meanwhile and
+hands them over in order after the stop (22 s of playback: 440 timer events
+and the click from its middle within 0.2 s), each stamped with when it
+happened (`ev["when"]`, on Windows the clock of `time.monotonic()`). 0.2.9:
+
+- keys stay in the NOLGIA windows (Settings);
+- a click more than a second old never counts, by its own time; a press counts
+  only if it was made after the request's buttons turned on; kept timer events
+  do no work, so the window catches up at once; after a hold up the request's
+  buttons look off again for a second;
+- the keeper keeps the session live while Resolve plays (Known limits);
+- a command read just after a hold up counts its time from the hold up's start,
+  and one whose time ran out does not run.
+
+Unit tests (tests/test_panel.py, tests/test_keeper.py, tests/test_runtime.py)
+and Resolve Studio 21.1.1 on Windows 11 through window messages only, 0.2.8
+against 0.2.9 with Ask before running code on and a `run` request showing
+(results in the release notes). On macOS it waits for its re-test.
+
 0.2.8 (October 30, 2026), reconnecting, the same change as nolgia-blender
 0.2.3 in the shared core (from the owner's fourth Mac test, where After
 Effects lost its connection while macOS showed another Space and was silent
@@ -296,7 +351,8 @@ wakes the app however slow its timers are. Unit tests (tests/test_reconnect.py,
 with a relay that breaks every connection or refuses them for a while) and
 Resolve Studio 21.1.1 on Windows 11 with the NOLGIA window minimized behind
 that relay, through window messages only (results in the release notes). On
-macOS it waits for its re-test.
+macOS it passed the owner's fifth Mac test (October 30, 2026): 10 minutes in
+another Space, and back 3 to 11 seconds after a 120 second network cut.
 
 0.2.7 (October 30, 2026), from the owner's fourth Mac test: 0.2.6 turned the
 request window's buttons off for their first second, and Resolve then
