@@ -31,6 +31,18 @@ TICK_MS = 50
 YIELD_IDLE = 0.005
 YIELD_BUSY = 0.030
 MAX_CODE_CHARS = 200000
+# The request window takes an answer only from a deliberate click (the owner's
+# Mac test 3: DIT copy request 74b78e66 was approved about 3 s after the
+# window opened, with the pointer resting where its Copy and verify button
+# appears and nobody clicking). Each time a request shows, both buttons stay
+# off for REQUEST_ARM_SECONDS, so a press that was already on its way, or
+# lands while the window opens under the pointer, is dropped (a press on a
+# button that is off never becomes a click, even if the release comes later);
+# neither button is a default button or takes keyboard focus, so Return and
+# Space never answer; and an answer counts only for the request the buttons
+# were turned on for.
+REQUEST_ARM_SECONDS = 1.0
+REQUEST_BUTTON = {"AutoDefault": False, "Default": False, "FocusPolicy": {"NoFocus": True}, "Enabled": False}
 FOOTER = "NOLGIA works in this DaVinci Resolve while this window is open and Connected is on."
 # Sizing, measured in Resolve 21.1.1: a UIManager window takes the width of
 # the widest Weight-0 child of its VGroup and cannot be dragged wider (its
@@ -154,6 +166,8 @@ class Panel:
         self.win = None
         self.request_win = None
         self.request_shown = None
+        self._request_armed_at = None
+        self._request_armed_for = None
         self.timer = None
         self._drawn = None
         self._activity_drawn = -1
@@ -324,6 +338,7 @@ class Panel:
             self._keep_min_height()
         if self._ticks % PROJECT_CHECK_TICKS == 0:
             self._note_project()
+        self._arm_request()
         ctl = self.controller
         ctl.tick()
         if self._scroll_to:
@@ -529,13 +544,41 @@ class Panel:
             except Exception:
                 pass
         items["Approve"].Text = request.approve_label
+        self._disarm_request(items)
         win.Show()
         try:
             win.Raise()
         except Exception:
             pass
         self.request_shown = first.id
+        self._request_armed_at = time.monotonic() + REQUEST_ARM_SECONDS
         self.log("Asked the person: %s." % request.title)
+
+    def _disarm_request(self, items=None):
+        """Turn the request window's buttons off until _arm_request turns them
+        on for the request then shown (see REQUEST_ARM_SECONDS)."""
+        self._request_armed_at = None
+        self._request_armed_for = None
+        if items is None and self.request_win is not None:
+            items = self.request_win.GetItems()
+        for bid in ("Approve", "Deny"):
+            try:
+                items[bid].Enabled = False
+            except Exception:
+                pass
+
+    def _arm_request(self):
+        """Every tick: once a shown request has waited REQUEST_ARM_SECONDS, turn
+        its buttons on, for that request only."""
+        at = self._request_armed_at
+        if at is None or self._request_armed_for is not None or self.request_shown is None:
+            return
+        if time.monotonic() < at:
+            return
+        items = self.request_win.GetItems()
+        for bid in ("Approve", "Deny"):
+            items[bid].Enabled = True
+        self._request_armed_for = self.request_shown
 
     def _build_request(self):
         """The "NOLGIA request" window, made once and reused."""
@@ -550,8 +593,8 @@ class Panel:
             ui.Label({"ID": "CodeNote", "Text": "Code runs on this computer with your permissions.", "Weight": 0}),
             ui.HGroup({"Weight": 0}, [
                 ui.HGap(0, 1),
-                ui.Button({"ID": "Deny", "Text": "Deny"}),
-                ui.Button({"ID": "Approve", "Text": "Approve"}),
+                ui.Button(dict(REQUEST_BUTTON, ID="Deny", Text="Deny")),
+                ui.Button(dict(REQUEST_BUTTON, ID="Approve", Text="Approve")),
             ]),
         ])
         win = self.disp.AddWindow({"ID": REQUEST_ID, "WindowTitle": "NOLGIA request",
@@ -559,12 +602,21 @@ class Panel:
 
         def decide(approve):
             def handler(ev):
-                command_id = self.request_shown
-                if command_id is not None:
-                    if approve:
-                        self.controller.executor.approve(command_id)
-                    else:
-                        self.controller.executor.deny(command_id)
+                items = win.GetItems()
+                label = items["Approve"].Text if approve else "Deny"
+                command_id = self._request_armed_for
+                armed_at = self._request_armed_at
+                if command_id is None or command_id != self.request_shown or armed_at is None \
+                        or time.monotonic() < armed_at:
+                    # Not a click on a request whose buttons were on: never an answer.
+                    self.log("Ignored a click on %s that came before the request's buttons were on." % label)
+                    return
+                if approve:
+                    answered = self.controller.executor.approve(command_id)
+                else:
+                    answered = self.controller.executor.deny(command_id)
+                self.log("The person clicked %s for request %s%s." % (
+                    label, command_id, "" if answered else ", which was no longer waiting"))
                 self.controller.bump()
                 self._close_request()
             return self._guard(handler)
@@ -579,6 +631,7 @@ class Panel:
     def _close_request(self):
         win = self.request_win
         if win is not None:
+            self._disarm_request()
             try:
                 win.Hide()
             except Exception:

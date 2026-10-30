@@ -6,7 +6,9 @@ Integrations README describes them."""
 
 KNOWN_PROPS = {
     "Label": {"ID", "Text", "WordWrap", "Weight", "Font", "Alignment", "Hidden", "MinimumSize"},
-    "Button": {"ID", "Text", "Weight", "Hidden", "Enabled", "ToolTip"},
+    # AutoDefault, Default and FocusPolicy ({"NoFocus": True}): seen taking
+    # effect in Resolve 21.1.1's UIManager (2026-10-29).
+    "Button": {"ID", "Text", "Weight", "Hidden", "Enabled", "ToolTip", "AutoDefault", "Default", "FocusPolicy"},
     "CheckBox": {"ID", "Text", "Weight", "Checked", "Hidden", "ToolTip"},
     "Tree": {"ID", "Weight", "RootIsDecorated", "AlternatingRowColors", "SelectionMode", "ColumnCount", "Hidden",
              "MinimumSize", "MaximumSize"},

@@ -264,12 +264,17 @@ def _json(text):
 
 
 def _size(b):
+    """A size as the NOLGIA CLI writes it (human_bytes): 601.5 KB, 9.3 MB."""
     b = float(b or 0)
+    if b >= 1e12:
+        return "%.2f TB" % (b / 1e12)
     if b >= 1e9:
         return "%.2f GB" % (b / 1e9)
     if b >= 1e6:
         return "%.1f MB" % (b / 1e6)
-    return "%d bytes" % b
+    if b >= 1e3:
+        return "%.1f KB" % (b / 1e3)
+    return "%d B" % b
 
 
 def plan_for(cli, a):
