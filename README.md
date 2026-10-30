@@ -288,13 +288,16 @@ if the release comes later), neither button is a default button or takes
 keyboard focus, and an answer counts only for the request the buttons were
 turned on for; every answer is logged with its request. Sizes in a DIT plan
 read as the CLI writes them (601.5 KB, 9.3 MB, not "601500 bytes"). Checked in
-Resolve Studio 21.1.1 on Windows 11 with window messages posted to the
-request window (mouse presses and releases at its Copy and verify button,
-Return and Space): 0.2.5 approved a click 0.3 s after the window opened, a
-press at 0.3 s released at 1.5 s, and Space once an earlier click had left
-the reused button with keyboard focus; 0.2.6 approved none of these and did
-approve a click 1.5 s after the window opened. Return approved neither.
-Unit tests and the in-app test (12/12). On macOS it waits for its re-test.
+Resolve Studio 21.1.1 on Windows 11, with real mouse and keyboard input and
+with window messages posted to the request window, at its Copy and verify
+button: 0.2.5 approved a click 0.3 s after the window opened and a press at
+0.3 s released at 1.5 s (both ways), and Space once an earlier click had
+left the reused button with keyboard focus (posted messages); 0.2.6 approved
+none of these. Neither approved with the pointer resting on the button, a
+press made before the window opened and released on the button, or Return.
+0.2.6 approved a click 1.5 s after the window opened (posted messages, and
+the in-app test's Run code click). Unit tests and the in-app test (12/12).
+On macOS it waits for its re-test.
 
 0.2.5 (October 29, 2026): the NOLGIA window finishes Resolve's quit only
 when it closes less than 0.5 s after Resolve's new Untitled Project opens
