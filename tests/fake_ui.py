@@ -12,14 +12,17 @@ KNOWN_PROPS = {
     # reports its Pressed and Released too (2026-10-30).
     "Button": {"ID", "Text", "Weight", "Hidden", "Enabled", "ToolTip", "AutoDefault", "Default", "FocusPolicy",
                "StyleSheet", "Events"},
-    "CheckBox": {"ID", "Text", "Weight", "Checked", "Hidden", "ToolTip"},
+    # FocusPolicy on a CheckBox, a Tree and a TextEdit, and StyleSheet on a
+    # TextEdit: seen taking effect in Resolve 21.1.1's UIManager (2026-10-30,
+    # with HasFocus() and IsActiveWindow() to read them back).
+    "CheckBox": {"ID", "Text", "Weight", "Checked", "Hidden", "ToolTip", "FocusPolicy"},
     "Tree": {"ID", "Weight", "RootIsDecorated", "AlternatingRowColors", "SelectionMode", "ColumnCount", "Hidden",
-             "MinimumSize", "MaximumSize"},
+             "MinimumSize", "MaximumSize", "FocusPolicy"},
     # HTML, PlaceholderText, MinimumSize, MaximumSize and Enabled: seen working
     # in Resolve 21.1.1's UIManager (2026-10-29), as were MoveCursor("End"),
     # EnsureCursorVisible(), ScrollToAnchor(name), SetFocus() and Clear().
     "TextEdit": {"ID", "PlainText", "HTML", "ReadOnly", "Font", "LineWrapMode", "Lexer", "Weight", "Hidden",
-                 "Enabled", "PlaceholderText", "MinimumSize", "MaximumSize"},
+                 "Enabled", "PlaceholderText", "MinimumSize", "MaximumSize", "FocusPolicy", "StyleSheet"},
     "Timer": {"ID", "Interval", "SingleShot"},
     "VGroup": {"Spacing", "Weight"},
     "HGroup": {"Spacing", "Weight"},
@@ -163,8 +166,10 @@ class Window:
     def Raise(self):
         pass
 
-    def fire(self, element_id, event="Clicked"):
-        self.On[element_id].events[event]({"who": element_id})
+    def fire(self, element_id, event="Clicked", **fields):
+        """Resolve's event: with when= (seconds, time.monotonic()'s clock) as
+        Resolve 21.1.1 stamps each event, else without a time."""
+        self.On[element_id].events[event](dict(fields, who=element_id))
 
 
 class UIManager:
@@ -219,10 +224,10 @@ class Dispatcher:
     def ExitLoop(self, code=0):
         self.exited = True
 
-    def tick(self, timer_id):
+    def tick(self, timer_id, **fields):
         timer = next(e for e in self.ui.timers if e.props.get("ID") == timer_id)
         if timer.started:
-            self.On.generic["Timeout"]({"what": "Timeout", "who": timer_id})
+            self.On.generic["Timeout"](dict(fields, what="Timeout", who=timer_id))
 
 
 class Fusion:
