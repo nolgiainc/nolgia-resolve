@@ -34,15 +34,28 @@ MAX_CODE_CHARS = 200000
 # The request window takes an answer only from a deliberate click (the owner's
 # Mac test 3: DIT copy request 74b78e66 was approved about 3 s after the
 # window opened, with the pointer resting where its Copy and verify button
-# appears and nobody clicking). Each time a request shows, both buttons stay
-# off for REQUEST_ARM_SECONDS, so a press that was already on its way, or
-# lands while the window opens under the pointer, is dropped (a press on a
-# button that is off never becomes a click, even if the release comes later);
-# neither button is a default button or takes keyboard focus, so Return and
-# Space never answer; and an answer counts only for the request the buttons
-# were turned on for.
+# appears and nobody clicking):
+# - each time a request shows, both buttons look off (REQUEST_OFF_STYLE) for
+#   REQUEST_ARM_SECONDS, then turn on; the log says when ("Approval buttons on
+#   for request ... at +1.0 s");
+# - a click answers only when its press came on that button after that:
+#   UIManager reports a button's Pressed as well as its Clicked when the
+#   button asks for them (REQUEST_BUTTON's Events), so a press while the
+#   buttons look off, released later, never counts;
+# - a press that started before the window opened is no click on the button
+#   at all (Qt), so it never answers and nothing reaches the plugin to log;
+# - neither button is a default button or takes keyboard focus, so Return and
+#   Space never answer;
+# - an answer counts only for the request the buttons were turned on for;
+# - every answer and every click the window refuses is logged with its
+#   request id.
+# (0.2.6 switched the buttons off instead. Resolve then delivers nothing for
+# a click on them, so refused clicks could not be logged; the owner's Mac
+# test 4.)
 REQUEST_ARM_SECONDS = 1.0
-REQUEST_BUTTON = {"AutoDefault": False, "Default": False, "FocusPolicy": {"NoFocus": True}, "Enabled": False}
+REQUEST_BUTTON = {"AutoDefault": False, "Default": False, "FocusPolicy": {"NoFocus": True},
+                  "Events": {"Clicked": True, "Pressed": True, "Released": True}}
+REQUEST_OFF_STYLE = "QPushButton { color: #5f5f5f; }"
 FOOTER = "NOLGIA works in this DaVinci Resolve while this window is open and Connected is on."
 # Sizing, measured in Resolve 21.1.1: a UIManager window takes the width of
 # the widest Weight-0 child of its VGroup and cannot be dragged wider (its
@@ -168,6 +181,8 @@ class Panel:
         self.request_shown = None
         self._request_armed_at = None
         self._request_armed_for = None
+        self._request_shown_at = None
+        self._request_press = None
         self.timer = None
         self._drawn = None
         self._activity_drawn = -1
@@ -551,19 +566,22 @@ class Panel:
         except Exception:
             pass
         self.request_shown = first.id
-        self._request_armed_at = time.monotonic() + REQUEST_ARM_SECONDS
+        self._request_shown_at = time.monotonic()
+        self._request_armed_at = self._request_shown_at + REQUEST_ARM_SECONDS
         self.log("Asked the person: %s." % request.title)
 
     def _disarm_request(self, items=None):
-        """Turn the request window's buttons off until _arm_request turns them
-        on for the request then shown (see REQUEST_ARM_SECONDS)."""
+        """Make the request window's buttons look off and refuse clicks until
+        _arm_request turns them on for the request then shown (see
+        REQUEST_ARM_SECONDS)."""
         self._request_armed_at = None
         self._request_armed_for = None
+        self._request_press = None
         if items is None and self.request_win is not None:
             items = self.request_win.GetItems()
         for bid in ("Approve", "Deny"):
             try:
-                items[bid].Enabled = False
+                items[bid].StyleSheet = REQUEST_OFF_STYLE
             except Exception:
                 pass
 
@@ -577,8 +595,10 @@ class Panel:
             return
         items = self.request_win.GetItems()
         for bid in ("Approve", "Deny"):
-            items[bid].Enabled = True
+            items[bid].StyleSheet = ""
         self._request_armed_for = self.request_shown
+        self.log("Approval buttons on for request %s at +%.1f s." % (
+            self.request_shown, time.monotonic() - self._request_shown_at))
 
     def _build_request(self):
         """The "NOLGIA request" window, made once and reused."""
@@ -600,17 +620,34 @@ class Panel:
         win = self.disp.AddWindow({"ID": REQUEST_ID, "WindowTitle": "NOLGIA request",
                                    "Geometry": [180, 160, 680, 460]}, layout)
 
+        def pressed(bid):
+            def handler(ev):
+                shown = self.request_shown
+                self._request_press = (bid, shown, shown is not None and self._request_armed_for == shown)
+            return self._guard(handler)
+
         def decide(approve):
             def handler(ev):
                 items = win.GetItems()
+                bid = "Approve" if approve else "Deny"
                 label = items["Approve"].Text if approve else "Deny"
-                command_id = self._request_armed_for
-                armed_at = self._request_armed_at
-                if command_id is None or command_id != self.request_shown or armed_at is None \
-                        or time.monotonic() < armed_at:
-                    # Not a click on a request whose buttons were on: never an answer.
-                    self.log("Ignored a click on %s that came before the request's buttons were on." % label)
+                shown = self.request_shown
+                press, self._request_press = self._request_press, None
+                if shown is None:
+                    self.log("Ignored a click on %s: no request was showing." % label)
                     return
+                why = None
+                if self._request_armed_for != shown:
+                    why = "it came %.2f s after the request showed, before its buttons were on" % (
+                        time.monotonic() - self._request_shown_at)
+                elif press is None or press[0] != bid or press[1] != shown:
+                    why = "the mouse button did not go down on it after the buttons were on"
+                elif not press[2]:
+                    why = "the mouse button went down on it before the buttons were on"
+                if why:
+                    self.log("Ignored a click on %s for request %s: %s." % (label, shown, why))
+                    return
+                command_id = shown
                 if approve:
                     answered = self.controller.executor.approve(command_id)
                 else:
@@ -621,6 +658,8 @@ class Panel:
                 self._close_request()
             return self._guard(handler)
 
+        win.On.Approve.Pressed = pressed("Approve")
+        win.On.Deny.Pressed = pressed("Deny")
         win.On.Approve.Clicked = decide(True)
         win.On.Deny.Clicked = decide(False)
         # Closing the request window leaves the request waiting in the NOLGIA window.

@@ -2,6 +2,7 @@
 """The NOLGIA window, against a stand-in UIManager: every state draws, the
 buttons and switches do what they say, and code waits for Approve."""
 
+import re
 import shutil
 import tempfile
 import time
@@ -55,7 +56,21 @@ class PanelTest(unittest.TestCase):
         """Let REQUEST_ARM_SECONDS pass; the next tick turns the buttons on."""
         time.sleep(panel_module.REQUEST_ARM_SECONDS)
         self.disp.tick(panel_module.TIMER_ID)
-        self.assertTrue(request.Find("Approve").Enabled and request.Find("Deny").Enabled)
+        self.assertFalse(self.looks_off(request))
+
+    @staticmethod
+    def looks_off(request):
+        styles = {request.Find(bid).props.get("StyleSheet") for bid in ("Approve", "Deny")}
+        if styles == {panel_module.REQUEST_OFF_STYLE}:
+            return True
+        assert styles == {""}, styles
+        return False
+
+    @staticmethod
+    def click(request, bid):
+        """A mouse click on a button: Resolve reports its Pressed, then its Clicked."""
+        request.fire(bid, "Pressed")
+        request.fire(bid, "Clicked")
 
     def sign_in(self):
         self.win.fire("SignIn")
@@ -141,26 +156,62 @@ class PanelTest(unittest.TestCase):
         pending = self._request("cmd-dit")
         self.panel.show_request()
         request = self.panel.request_win
-        self.assertFalse(request.Find("Approve").Enabled)
-        self.assertFalse(request.Find("Deny").Enabled)
-        request.fire("Approve")
-        request.fire("Deny")
+        self.assertTrue(self.looks_off(request))
+        self.click(request, "Approve")
+        self.click(request, "Deny")
         self.disp.tick(panel_module.TIMER_ID)
         self.assertIsNone(pending.decision)
         self.assertTrue(request.shown)
-        self.assertEqual(sum("Ignored a click" in line for line in self.lines), 2)
+        # Each refused click is logged with its request (the owner's Mac test 4).
+        refused = [line for line in self.lines if line.startswith("Ignored a click on ")]
+        self.assertEqual(len(refused), 2, refused)
+        self.assertRegex(refused[0], r"^Ignored a click on Copy and verify for request cmd-dit: it came 0\.\d\d s "
+                                     r"after the request showed, before its buttons were on\.$")
+        self.assertRegex(refused[1], r"^Ignored a click on Deny for request cmd-dit: ")
         time.sleep(panel_module.REQUEST_ARM_SECONDS / 2)
         self.disp.tick(panel_module.TIMER_ID)
-        self.assertFalse(request.Find("Approve").Enabled, "still off half way")
-        request.fire("Approve")
+        self.assertTrue(self.looks_off(request), "still off half way")
+        self.click(request, "Approve")
         self.assertIsNone(pending.decision)
+
+    def test_the_log_says_when_the_buttons_turn_on(self):
+        self._request("cmd-dit")
+        self.panel.show_request()
+        self.wait_for_buttons(self.panel.request_win)
+        self.assertTrue(any(re.match(r"^Approval buttons on for request cmd-dit at \+1\.\d s\.$", line)
+                            for line in self.lines), self.lines)
+
+    def test_a_press_while_the_buttons_look_off_never_counts_even_released_later(self):
+        pending = self._request("cmd-dit")
+        self.panel.show_request()
+        request = self.panel.request_win
+        request.fire("Approve", "Pressed")  # the press lands while they look off
+        self.wait_for_buttons(request)
+        request.fire("Approve", "Clicked")  # released on the button after they turned on
+        self.assertIsNone(pending.decision)
+        self.assertIn("Ignored a click on Copy and verify for request cmd-dit: the mouse button went down on it "
+                      "before the buttons were on.", self.lines)
+        self.click(request, "Approve")
+        self.assertIs(pending.decision, True)
+
+    def test_a_click_with_no_press_on_that_button_never_counts(self):
+        pending = self._request("cmd-dit")
+        self.panel.show_request()
+        request = self.panel.request_win
+        self.wait_for_buttons(request)
+        request.fire("Approve", "Clicked")
+        request.fire("Deny", "Pressed")
+        request.fire("Approve", "Clicked")
+        self.assertIsNone(pending.decision)
+        self.assertEqual(sum("the mouse button did not go down on it after the buttons were on" in line
+                             for line in self.lines), 2)
 
     def test_once_armed_a_click_answers_that_request(self):
         pending = self._request("cmd-dit")
         self.panel.show_request()
         request = self.panel.request_win
         self.wait_for_buttons(request)
-        request.fire("Approve")
+        self.click(request, "Approve")
         self.assertIs(pending.decision, True)
         self.assertFalse(request.shown)
         self.assertIn("The person clicked Copy and verify for request cmd-dit.", self.lines)
@@ -175,12 +226,12 @@ class PanelTest(unittest.TestCase):
         self.controller.executor.approvals.remove(first)
         second = self._request("cmd-b")
         self.panel.show_request()
-        self.assertFalse(request.Find("Approve").Enabled)
-        request.fire("Approve")
+        self.assertTrue(self.looks_off(request))
+        self.click(request, "Approve")
         self.assertIsNone(first.decision)
         self.assertIsNone(second.decision)
         self.wait_for_buttons(request)
-        request.fire("Deny")
+        self.click(request, "Deny")
         self.assertIs(second.decision, False)
         self.assertIsNone(first.decision)
         self.assertIn("The person clicked Deny for request cmd-b.", self.lines)
@@ -191,9 +242,10 @@ class PanelTest(unittest.TestCase):
         request = self.panel.request_win
         self.wait_for_buttons(request)
         request.fire(panel_module.REQUEST_ID, "Close")
-        request.fire("Approve")  # a click that was already on its way
+        self.click(request, "Approve")  # a click that was already on its way
         self.assertIsNone(pending.decision)
-        self.assertFalse(request.Find("Approve").Enabled)
+        self.assertTrue(self.looks_off(request))
+        self.assertIn("Ignored a click on Copy and verify: no request was showing.", self.lines)
 
     def test_a_plain_request_is_shown_as_text_not_code(self):
         # The owner's Mac test 2: the DIT copy's plan was coloured like Python.
@@ -306,13 +358,14 @@ class PanelTest(unittest.TestCase):
         self.assertEqual(self.item("Waiting").Text, "1 request waiting for you.")
         self.assertEqual(self.item("Status").Text, "Waiting for you to approve a request.")
         self.assertTrue(request.shown)
-        self.assertFalse(request.Find("Approve").Enabled)
-        request.fire("Approve")  # a click as the window opens is no answer
+        self.assertTrue(self.looks_off(request))
+        self.click(request, "Approve")  # a click as the window opens is no answer
         self.disp.tick(panel_module.TIMER_ID)
         self.assertEqual([p.id for p in self.controller.executor.approvals], [first])
-        self.assertIn("Ignored a click on Run code that came before the request's buttons were on.", self.lines)
+        self.assertTrue(any(line.startswith("Ignored a click on Run code for request %s: it came " % first)
+                            for line in self.lines), self.lines)
         self.wait_for_buttons(request)
-        request.fire("Approve")
+        self.click(request, "Approve")
         self.tick_until(lambda: self.status_of(first)["status"] == "succeeded")
         self.assertIn("The person clicked Run code for request %s." % first, self.lines)
         self.assertEqual(self.status_of(first)["result"]["value"], 42)
@@ -328,9 +381,9 @@ class PanelTest(unittest.TestCase):
         self.assertTrue(self.visible("Review"))
         self.win.fire("Review")
         self.assertTrue(request.shown)
-        self.assertFalse(request.Find("Deny").Enabled, "showing it again turns the buttons off again")
+        self.assertTrue(self.looks_off(request), "showing it again turns the buttons off again")
         self.wait_for_buttons(request)
-        request.fire("Deny")
+        self.click(request, "Deny")
         self.tick_until(lambda: self.status_of(second)["status"] == "failed")
         self.assertEqual(self.status_of(second)["error"], "The person at DaVinci Resolve clicked Deny, so this did not run.")
         self.tick_until(lambda: [r.Text[2] for r in self.item("Activity").rows][:2] == ["Failed", "Done"])

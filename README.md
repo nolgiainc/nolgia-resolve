@@ -110,9 +110,13 @@ Settings in the NOLGIA window:
 - **Ask before running code**: show every piece of Python NOLGIA wants to run
   in a NOLGIA request window and wait for you to click Run code or Deny.
   Closing that window leaves the request waiting (Show request brings it back).
-  Its buttons turn on 1 second after a request shows, and only a click
-  answers: Return and Space never do, and a click counts only for the request
-  shown when the buttons turned on.
+  Its buttons look off for 1 second after a request shows, and only a click
+  pressed on a button after that answers: Return and Space never do, and a
+  click counts only for the request shown when the buttons turned on. The
+  window's log (`nolgia.log`) says when the buttons turn on, names the
+  request for every answer, and logs every click on the buttons it refused,
+  with its request and why. A press that started before the window opened is
+  no click on the buttons at all, so it never answers and has nothing to log.
 - **Sign out**: disconnect and forget the sign in on this computer.
 
 The sign in and the switches are kept in `settings.json` in a NOLGIA folder
@@ -279,6 +283,22 @@ the project since it was last saved.
   stays as it was before 0.2.3.
 
 ## Tested on
+
+0.2.7 (October 30, 2026), from the owner's fourth Mac test: 0.2.6 turned the
+request window's buttons off for their first second, and Resolve then
+delivers nothing for a click on them, so its "Ignored a click" line (which
+also lacked the request) could never be written. 0.2.7 keeps the buttons on
+but makes them look off for that second, asks Resolve for each button's
+Pressed as well as its Clicked, and refuses (and logs, with the request and
+why) a click that came before the buttons turned on or whose press did; it
+also logs "Approval buttons on for request <id> at +1.0 s". Checked in
+Resolve Studio 21.1.1 on Windows 11 with window messages posted to the
+request window: a click 0.39 s after the window opened and a press at 0.3 s
+released at 1.5 s were refused and logged with the request; Return and Space
+answered nothing; a click 1.6 s after it opened was approved and logged. A
+button with Events (Clicked, Pressed, Released) reported Pressed, Released
+and Clicked for a click; a disabled button reported nothing. Unit tests and
+the in-app test. On macOS it waits for its re-test.
 
 0.2.6 (October 29, 2026), from the owner's third Mac test, where a DIT copy
 request was approved about 3 s after the NOLGIA request window opened with
