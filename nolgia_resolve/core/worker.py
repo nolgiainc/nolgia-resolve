@@ -24,6 +24,22 @@ from .commands import CAPABILITIES, Command, CommandError, result_body, validate
 from .util import Backoff, computer_name, os_name, remember_computer_name
 
 
+# After a network failure the plugin is back within NETWORK_RETRY_MAX seconds
+# of the network (the owner's Mac test 4, 2026-10-30: After Effects lost its
+# connection on a broken socket while macOS showed another Space and was
+# silent for 5 minutes, long enough for commands sent to it to expire; the
+# Adobe and Photoshop plugins got this in 0.2.6 and 0.2.5):
+# - the first network failure after a working connection is tried again at
+#   once, on a new connection;
+# - after that, network failures wait at most NETWORK_RETRY_MAX seconds (with
+#   jitter), not the 60 s an overloaded NOLGIA (429, 5xx) still gets;
+# - a failed heartbeat's wait also ends as soon as a poll gets through;
+# - a heartbeat that is due is also sent each time a poll comes back. A
+#   poll's answer is network input, which wakes the app even when its timers
+#   are slowed (macOS App Nap slows the timers of an app it does not show),
+#   so the session stays live while polls keep coming back.
+NETWORK_RETRY_MAX = 10.0
+
 # The API's limits on POST /bridge/sessions fields (characters).
 MAX_VERSION = 64
 MAX_MACHINE_NAME = 128
@@ -52,7 +68,7 @@ class Status:
 class BridgeWorker:
     def __init__(self, api, executor, activity, instance_id, snapshot,
                  prepare=None, finish=None, on_status=None, on_auth_failed=None,
-                 log=None, heartbeat_interval=20.0, machine_name=None):
+                 log=None, heartbeat_interval=20.0, machine_name=None, network_retry_max=NETWORK_RETRY_MAX):
         self.api = api
         self.executor = executor
         self.activity = activity
@@ -64,6 +80,8 @@ class BridgeWorker:
         self.on_auth_failed = on_auth_failed or (lambda message: None)
         self.log = log or (lambda message: None)
         self.heartbeat_interval = heartbeat_interval
+        self.network_retry_max = network_retry_max
+        self.last_heartbeat_at = 0.0  # time.monotonic() of the last heartbeat NOLGIA took
         # A name looked up here is kept for NOLGIA for Photoshop (start()).
         self._remember_name = machine_name is None
         self.machine_name = machine_name if machine_name is not None else computer_name()
@@ -191,8 +209,19 @@ class BridgeWorker:
             why = "NOLGIA refused the connection: %s" % (err.detail or err.title or err.status)
         return "%s Trying again in %d s." % (why, max(1, round(delay)))
 
+    def _retry_delay(self, err, backoff, streak):
+        """How long to wait after a failed request (see NETWORK_RETRY_MAX);
+        None means try again at once."""
+        if isinstance(err, NetworkError):
+            if streak["first"]:
+                streak["first"] = False
+                return None
+            return min(backoff.next(), self.network_retry_max)
+        return getattr(err, "retry_after", None) or backoff.next()
+
     def _heartbeat_loop(self):
         backoff = Backoff(1.0, 60.0)
+        streak = {"first": True}
         try:
             while not self._stop.is_set():
                 try:
@@ -204,10 +233,14 @@ class BridgeWorker:
                     if self._send_os and isinstance(err, ApiError) and err.status == 400 and '"os"' in err.detail:
                         self._send_os = False
                         continue
-                    delay = getattr(err, "retry_after", None) or backoff.next()
+                    delay = self._retry_delay(err, backoff, streak)
+                    if delay is None:
+                        self.log("The connection to NOLGIA broke (%s); trying again at once." % err)
+                        continue
                     self._set_status(Status.RETRYING, self._retry_text(err, delay))
                     self.log(self.status_text)
-                    self._wait(delay)
+                    self._wake.clear()
+                    self._wake.wait(delay)  # stop, or a poll that gets through, ends it early
                     continue
                 # The API answers the session itself; accept {"session": {...}} too.
                 session = data if data.get("id") else data.get("session")
@@ -218,6 +251,8 @@ class BridgeWorker:
                     self._wait(delay)
                     continue
                 backoff.reset()
+                streak["first"] = True
+                self.last_heartbeat_at = time.monotonic()
                 wait = data.get("poll_wait_seconds") or session.get("poll_wait_seconds") or 25
                 try:
                     wait = max(1, min(25, int(wait)))
@@ -246,6 +281,7 @@ class BridgeWorker:
 
     def _poll_loop(self):
         backoff = Backoff(1.0, 60.0)
+        streak = {"first": True}
         try:
             while not self._stop.is_set():
                 if not self._session_ready.wait(0.5):
@@ -269,12 +305,17 @@ class BridgeWorker:
                     self._wait(delay)
                     continue
                 except NetworkError as err:
-                    delay = backoff.next()
+                    delay = self._retry_delay(err, backoff, streak)
+                    if delay is None:
+                        continue  # at once, on a new connection
                     self._set_status(Status.RETRYING, self._retry_text(err, delay))
                     self._wait(delay)
                     self._wake.set()  # re-check the session as soon as we are back
                     continue
                 backoff.reset()
+                streak["first"] = True
+                if time.monotonic() - self.last_heartbeat_at >= self.heartbeat_interval:
+                    self._wake.set()
                 if self.state == Status.RETRYING:
                     self._set_status(Status.CONNECTED, "Connected. NOLGIA can work in this DaVinci Resolve.")
                 if data:

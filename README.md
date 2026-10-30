@@ -284,6 +284,20 @@ the project since it was last saved.
 
 ## Tested on
 
+0.2.8 (October 30, 2026), reconnecting, the same change as nolgia-blender
+0.2.3 in the shared core (from the owner's fourth Mac test, where After
+Effects lost its connection while macOS showed another Space and was silent
+for 5 minutes): the first network failure after a working connection is
+tried again at once; after that, network failures wait at most 10 s
+(NOLGIA's own 429 and 5xx still up to 60 s); a failed heartbeat's wait ends
+as soon as a poll gets through; and a heartbeat that is due is also sent
+each time a poll comes back, since a poll's answer is network input, which
+wakes the app however slow its timers are. Unit tests (tests/test_reconnect.py,
+with a relay that breaks every connection or refuses them for a while) and
+Resolve Studio 21.1.1 on Windows 11 with the NOLGIA window minimized behind
+that relay, through window messages only (results in the release notes). On
+macOS it waits for its re-test.
+
 0.2.7 (October 30, 2026), from the owner's fourth Mac test: 0.2.6 turned the
 request window's buttons off for their first second, and Resolve then
 delivers nothing for a click on them, so its "Ignored a click" line (which
