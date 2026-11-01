@@ -12,9 +12,124 @@ is on, opening a file over unsaved changes). Those wait in `approvals` until
 the person clicks Approve or Deny, or the command runs out of time.
 """
 
+import contextlib
 import queue
 import threading
 import time
+
+
+class Quiet:
+    """Keeps the plugin's own background threads out of Python while the
+    main thread says so. NOLGIA for Blender needs it; the other apps' plugins
+    pass NoQuiet.
+
+    Why (the crash of 2026-11-01, and the one of 2026-10-06): Blender 4.2 to
+    4.5 run Python 3.11, and Blender lets go of Python's lock (the GIL) while
+    an operator runs. Inside `bpy.context.temp_override(...)`, every context
+    lookup the operator makes (the active object, the scene) asks Python, and
+    Blender only takes the lock back when no other thread holds it: it tells
+    by `PyThreadState_GetDict()`, which on Python 3.11 answers for whichever
+    thread holds the lock. So while one of our network threads runs Python,
+    an operator inside an override uses Python unlocked, at the same time as
+    that thread, and Python's memory breaks (EXCEPTION_ACCESS_VIOLATION in
+    python311.dll, often a moment later in another thread).
+
+    The main thread `hold()`s while it has an override open. A background
+    thread wraps each piece of its work in `work()`: that waits, parked in a
+    plain lock wait that runs no Python, while a hold is on. `hold()` waits a
+    moment for work already under way to finish. A thread that must not wait
+    for ever (the heartbeat keeps the session live) passes `limit`.
+    """
+
+    def __init__(self, clock=time.monotonic):
+        self._cond = threading.Condition(threading.Lock())
+        self._clock = clock
+        self._holds = 0
+        self._working = 0
+        self._closed = False
+
+    @property
+    def held(self):
+        return self._holds > 0
+
+    def hold(self, settle=2.0):
+        """Main thread: no new background work starts until release(). Waits
+        up to `settle` seconds for work under way to finish; returns True
+        when nothing is running then."""
+        with self._cond:
+            self._holds += 1
+            end = self._clock() + settle
+            while self._working and not self._closed:
+                left = end - self._clock()
+                if left <= 0:
+                    return False
+                self._cond.wait(left)
+            return True
+
+    def release(self):
+        with self._cond:
+            self._holds = max(0, self._holds - 1)
+            if not self._holds:
+                self._cond.notify_all()
+
+    @contextlib.contextmanager
+    def held_quiet(self, settle=2.0):
+        self.hold(settle)
+        try:
+            yield
+        finally:
+            self.release()
+
+    @contextlib.contextmanager
+    def work(self, limit=None):
+        """Background thread: run the block when no hold is on. With `limit`
+        (seconds), go ahead anyway once a hold has lasted that long."""
+        with self._cond:
+            end = None if limit is None else self._clock() + limit
+            while self._holds and not self._closed:
+                if end is None:
+                    self._cond.wait()
+                    continue
+                left = end - self._clock()
+                if left <= 0:
+                    break
+                self._cond.wait(left)
+            self._working += 1
+        try:
+            yield
+        finally:
+            with self._cond:
+                self._working -= 1
+                self._cond.notify_all()
+
+    def close(self):
+        """DaVinci Resolve is closing: nothing waits any more."""
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+
+
+class NoQuiet:
+    """For apps whose scripting has no such lock problem: never waits."""
+
+    held = False
+
+    def hold(self, settle=2.0):
+        return True
+
+    def release(self):
+        pass
+
+    @contextlib.contextmanager
+    def held_quiet(self, settle=2.0):
+        yield
+
+    @contextlib.contextmanager
+    def work(self, limit=None):
+        yield
+
+    def close(self):
+        pass
 
 
 class Ticket:

@@ -312,6 +312,18 @@ the project since it was last saved.
 
 ## Tested on
 
+0.2.10 (November 2, 2026): the chat shows work NOLGIA Agent finished in the
+background as one grey line, "Background work finished. NOLGIA is reporting
+what it produced.", never that row's own text, which is the Agent's
+instructions and the raw output of the work (in NOLGIA for Blender it showed
+the pod's shell commands, 2026-11-01). NOLGIA's API serves that line for every
+plugin version since the same day. It also takes the shared core from NOLGIA
+for Blender 0.2.4 (its fix for a Blender crash: this plugin passes the no-op
+`NoQuiet`, so nothing waits here), where the network thread now waits for a
+command without waking every 0.5 s. Unit tests (210, with the core compared to
+nolgia-blender) and the mock API; not yet run in DaVinci Resolve itself, which
+was recording another demo.
+
 0.2.9 (October 30, 2026), from the owner's fifth Mac test, where Space in the
 request window started Resolve's playback and the plugin then answered
 nothing until it stopped: the session fell off NOLGIA's list, commands were

@@ -33,6 +33,7 @@ from datetime import datetime, timezone
 
 from . import AGENT_URL, APP, BILLING_URL, COST_LINE, COST_LINE_RATE
 from .api import ApiError, NetworkError, Unauthorized
+from .mainthread import NoQuiet
 
 MAX_CHARS = 8000  # SubmitAgentMessageRequest.content
 SESSION_NAME_MAX = 80
@@ -40,6 +41,12 @@ ROWS_SHOWN = 6  # the last three turns; the sidebar stays short, the rest is on 
 WAKE_EVERY = 10 * 60  # seconds between wake calls, like the site's chat
 APP_NAME = "DaVinci Resolve"
 SIGN_IN_EXPIRED = "Your NOLGIA sign in expired. Sign in again."
+# A row NOLGIA filed itself (origin "background": work the Agent had started
+# finished after its reply). Its text is the Agent's instructions and the raw
+# output of that work, shell commands and all, so the chat never shows it:
+# it shows this, as nolgia.ai/agent does, and the Agent's reply says what the
+# work produced.
+BACKGROUND_NOTICE = "Background work finished. NOLGIA is reporting what it produced."
 
 
 def poll_delay(pending_for):
@@ -244,10 +251,13 @@ class AgentChat:
     safe from any thread. `begin(link)` gives the API client, this install's
     instance id and where to remember the chat."""
 
-    def __init__(self, owner, clock=time.time, threaded=True):
+    def __init__(self, owner, clock=time.time, threaded=True, quiet=None):
         self.owner = owner
         self.clock = clock
         self.threaded = threaded
+        # The chat thread waits while the main thread holds this (see
+        # mainthread.Quiet).
+        self.quiet = quiet or NoQuiet()
         self._lock = threading.RLock()
         self._jobs = queue.Queue()
         self._thread = None
@@ -340,7 +350,8 @@ class AgentChat:
             if job is None:
                 return
             try:
-                self._do(job)
+                with self.quiet.work():
+                    self._do(job)
             except Exception as err:  # never let the thread die
                 self.owner.log("Chat: %s" % err)
 
@@ -830,13 +841,14 @@ class AgentChat:
                 agent = row.get("role") == "agent"
                 question = row.get("question")
                 cost = row.get("cost") or {}
+                background = row.get("origin") == "background"
                 rows.append({
                     "id": row.get("id"),
                     "role": row.get("role"),
                     "status": row.get("status"),
-                    "background": row.get("origin") == "background",
+                    "background": background,
                     "queued": bool(row.get("queued")),
-                    "text": row.get("content") or "",
+                    "text": BACKGROUND_NOTICE if background else (row.get("content") or ""),
                     "blocks": format_reply(row.get("content")) if agent and row.get("status") != "failed" else None,
                     "failure": failure_text(row) if agent and row.get("status") in ("failed", "interrupted") else None,
                     "question": question if (agent and row.get("status") == "complete" and isinstance(question, dict)

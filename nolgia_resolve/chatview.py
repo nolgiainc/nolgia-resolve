@@ -39,11 +39,17 @@ def thread_html(view):
         if row["role"] == "agent" and row["status"] == "pending":
             continue
         out.append('<a name="%s"></a>' % anchor(row["id"]))
+        if row["role"] != "agent" and row["background"]:
+            # Filed by NOLGIA, not typed by the person: one grey line
+            # (core/chat.py BACKGROUND_NOTICE), never the row's own text,
+            # which is the Agent's instructions and raw output.
+            out.append('<p style="margin-top:10px; color:#8a8a8a; font-size:small">%s</p>'
+                       % html.escape(row["text"]))
+            continue
         if row["role"] != "agent":
-            who = "BACKGROUND WORK FINISHED" if row["background"] else "YOU"
             text = html.escape(row["text"]).replace("\n", "<br>")
-            out.append('<p style="margin-top:10px"><span style="color:#8a8a8a; font-size:small"><b>%s</b></span>'
-                       "<br>%s</p>" % (who, text))
+            out.append('<p style="margin-top:10px"><span style="color:#8a8a8a; font-size:small"><b>YOU</b></span>'
+                       "<br>%s</p>" % text)
             continue
         out.append('<p style="margin-top:10px"><span style="color:#ff6a1a; font-size:small"><b>NOLGIA AGENT</b>'
                    "</span></p>")
