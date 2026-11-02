@@ -82,12 +82,13 @@ def install_look(lut_root, look, strength=1.0, space="dwg", size=33):
     _write_if_changed(cube_path, L.cube_text(look, size, space))
     cube_name = os.path.basename(cube_path)
     pct = int(round(strength * 100))
+    stem = L.file_stem(look)
     for step in sorted(set(STRENGTH_STEPS) | ({pct} if 0 < pct < 100 else set())):
-        name = "%s %d%%.dctl" % (look.name, step)
+        name = "%s %d%%.dctl" % (stem, step)
         _write_if_changed(os.path.join(folder, name), strength_dctl(look, cube_name, step / 100.0, space))
     if pct >= 100:
         return rel(cube_rel)
-    return rel(os.path.join(os.path.dirname(cube_rel), "%s %d%%.dctl" % (look.name, pct)))
+    return rel(os.path.join(os.path.dirname(cube_rel), "%s %d%%.dctl" % (stem, pct)))
 
 
 def install_all_looks(lut_root, space="dwg"):

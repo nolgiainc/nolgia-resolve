@@ -142,19 +142,23 @@ working on:
 - **CST OUT** renders to Rec.709 gamma 2.4 with a filmic tone curve and a soft
   gamut compression, exactly invertible.
 
-**The film look library** is NOLGIA's own: 24 looks written as code (a
-negative, print and dye model built from how film behaves, and log-space
-creative looks), with generic names in our own words. Print: Theatrical
-Print, Soft Print, Warm Print, Cool Print, Classic Print. Negative: Daylight
-Neg 50 and 250, Tungsten Neg 200 and 500, Portrait Neg 400, Vivid Neg 100,
-Consumer Neg 400. Reversal: Vivid Slide, Neutral Slide. Process: Bleach
-Bypass, Cross Process. Black and white: B&W Pan 400, B&W High Contrast, B&W
-Ortho. Creative: Neutral Film, Teal and Orange, Faded Film, Day for Night,
-Golden Hour. They are built for the DaVinci Wide Gamut / Intermediate working
-space (and ACEScct in ACES projects) and installed in `NOLGIA Grade` in
-Resolve's LUT folder when first used. Resolve's own Film Looks LUTs stay
-Resolve's: NOLGIA can point a node at them on your computer and never copies
-them.
+**The film look library** is NOLGIA's own: 26 looks written as code, baked to
+LUTs on your computer. A look named after a film stock is NOLGIA's emulation of
+it, modelled on the maker's published technical data (characteristic curves,
+density range and the colour behaviour each sheet describes) and named in the
+industry's style with "(NOLGIA)". Print: Kodak 2383 print (and warm and cool
+timings), Fujifilm Eterna-CP 3513DI print, Classic Print. Negative: Kodak
+Vision3 50D 5203, 250D 5207, 200T 5213 and 500T 5219, Fujifilm Eterna 250D 8563
+and Eterna Vivid 160, Kodak Portra 400, Kodak Ektar 100, Fujifilm Superia X-TRA
+400. Reversal: Fujifilm Velvia 50 and Provia 100F. Process: Bleach Bypass, Cross
+Process. Black and white: Kodak Tri-X 400, Ilford HP5 Plus, Ilford Ortho Plus 80.
+Creative: Neutral Film, Teal and Orange, Faded Film, Day for Night, Golden Hour.
+They are built for the DaVinci Wide Gamut / Intermediate working space (and
+ACEScct in ACES projects) and installed in `NOLGIA Grade` in Resolve's LUT
+folder when first used. Resolve's own Film Looks LUTs stay Resolve's: NOLGIA can
+point a node at them on your computer and never copies them. Film stock and
+camera names are trademarks of their owners and describe the look each
+emulates. NOLGIA is not affiliated with or endorsed by them.
 
 ## Settings
 

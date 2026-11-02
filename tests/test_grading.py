@@ -132,7 +132,7 @@ class DrxTest(unittest.TestCase):
         self.assertEqual(text.count("<Body>81"), 2)
 
 
-TRADEMARKS = ("kodak", "fuji", "ilford", "agfa", "cinestill", "portra", "ektar", "vision3", "eterna", "velvia",
+TRADEMARKS = ("kodak", "fuji", "fujifilm", "ilford", "agfa", "cinestill", "portra", "ektar", "vision3", "eterna", "velvia",
               "provia", "superia", "reala", "tri-x", "hp5", "arri", "alexa", "kodachrome", "2383", "3513", "k1s1")
 
 
@@ -156,8 +156,8 @@ class LooksTest(unittest.TestCase):
         self.assertTrue(set(look.family for look in looks.LOOKS) <= set(looks.FAMILIES))
 
     def test_every_look_is_sane(self):
-        tinted = {"warm-print", "cool-print", "consumer-neg-400", "cross-process", "teal-orange", "day-for-night",
-                  "golden-hour", "faded-film", "portrait-neg-400", "classic-print"}
+        tinted = {"kodak-2383-print-warm", "kodak-2383-print-cool", "cross-process", "teal-orange", "day-for-night",
+                  "golden-hour", "faded-film", "kodak-portra-400", "classic-print"}
         for look in looks.LOOKS:
             f = look.function
             grey = C.dwg_to_display(f([C.di_encode(0.18)] * 3))
@@ -188,20 +188,22 @@ class LibraryTest(unittest.TestCase):
     def test_install(self):
         self.assertGreater(library.install_base(self.root), 0)
         self.assertEqual(library.install_base(self.root), 0)  # unchanged files are not rewritten
-        path = library.install_look(self.root, looks.BY_SLUG["warm-print"], 0.6)
-        self.assertEqual(path, "NOLGIA Grade/Looks/Print/Warm Print 60%.dctl")
+        warm = looks.find("warm-print")
+        stem = "Kodak 2383 print warm timing NOLGIA"  # no comma or bracket: a DEFINE_LUT path cannot have them
+        path = library.install_look(self.root, warm, 0.6)
+        self.assertEqual(path, "NOLGIA Grade/Looks/Print/%s 60%%.dctl" % stem)
         folder = os.path.join(self.root, "NOLGIA Grade", "Looks", "Print")
         names = sorted(os.listdir(folder))
-        self.assertIn("Warm Print.cube", names)
-        self.assertIn("Warm Print 10%.dctl", names)
-        with open(os.path.join(folder, "Warm Print 60%.dctl"), encoding="utf-8") as handle:
+        self.assertIn(stem + ".cube", names)
+        self.assertIn(stem + " 10%.dctl", names)
+        with open(os.path.join(folder, stem + " 60%.dctl"), encoding="utf-8") as handle:
             text = handle.read()
-        self.assertIn("DEFINE_LUT(look, Warm Print.cube)", text)
+        self.assertIn("DEFINE_LUT(look, %s.cube)" % stem, text)
         self.assertIn("0.60", text)
-        self.assertEqual(library.install_look(self.root, looks.BY_SLUG["warm-print"], 1.0),
-                         "NOLGIA Grade/Looks/Print/Warm Print.cube")
-        self.assertEqual(library.install_look(self.root, looks.BY_SLUG["warm-print"], 0.37),
-                         "NOLGIA Grade/Looks/Print/Warm Print 37%.dctl")
+        self.assertEqual(library.install_look(self.root, warm, 1.0), "NOLGIA Grade/Looks/Print/%s.cube" % stem)
+        self.assertEqual(library.install_look(self.root, warm, 0.37), "NOLGIA Grade/Looks/Print/%s 37%%.dctl" % stem)
+        for look in looks.LOOKS:
+            self.assertFalse(set(looks.file_stem(look)) & set("(),;"), look.name)
 
 
 def write_tiff(path, w, h, pixels):
@@ -277,9 +279,11 @@ class ArgsTest(unittest.TestCase):
         self.assertEqual(args["strength"], 1.0)
 
     def test_values(self):
-        args = engine.validate_args({"clips": [1, 3], "match": 3, "look": "Warm Print", "strength": 60, "camera": "S-Log3"})
+        args = engine.validate_args({"clips": [1, 3], "match": 3, "look": "Kodak 2383 print, warm timing", "strength": 60,
+                                     "camera": "S-Log3"})
         self.assertEqual((args["clips"], args["match"], args["look"], args["strength"], args["camera"]),
-                         ([1, 3], 3, "warm-print", 0.6, "slog3"))
+                         ([1, 3], 3, "kodak-2383-print-warm", 0.6, "slog3"))
+        self.assertEqual(engine.validate_args({"look": "warm-print"})["look"], "kodak-2383-print-warm")  # old slug
 
     def test_refusals(self):
         for bad in ({"action": "paint"}, {"look": "Kodak 2383"}, {"strength": 300}, {"clips": [0]}, {"match": "3"},
@@ -291,7 +295,7 @@ class ArgsTest(unittest.TestCase):
         title, lines = engine.describe(engine.validate_args({"match": 3, "look": "warm-print", "strength": 0.6}))
         text = " ".join(lines)
         self.assertIn("matched to clip 3", text)
-        self.assertIn("Warm Print at 60%", text)
+        self.assertIn("Kodak 2383 print, warm timing (NOLGIA) at 60%", text)
         self.assertIn("no NOLGIA credits", text)
         self.assertIn("Versions menu", text)
 
@@ -485,7 +489,7 @@ class GraderTest(unittest.TestCase):
         shutil.rmtree(self.root, ignore_errors=True)
 
     def test_correct_match_and_look(self):
-        args = engine.validate_args({"match": 3, "look": "warm-print", "strength": 0.6})
+        args = engine.validate_args({"match": 3, "look": "kodak-2383-print-warm", "strength": 0.6})
         result = engine.Grader(self.ops).run(args)
         clips = {c["clip"]: c for c in result["clips"]}
         self.assertEqual([c["camera"] for c in result["clips"]], ["slog3"] * 3)
@@ -503,8 +507,9 @@ class GraderTest(unittest.TestCase):
             self.assertEqual([n["label"] for n in item.nodes], list(engine.LABELS))
             self.assertTrue(all(n["on"] for n in item.nodes))
             look = item.nodes[6]["params"][drx.LUT_PATH]
-            self.assertEqual(look, "NOLGIA Grade\\Looks\\Print\\Warm Print 60%.dctl")
-        self.assertTrue(os.path.isfile(os.path.join(self.root, "NOLGIA Grade", "Looks", "Print", "Warm Print.cube")))
+            self.assertEqual(look, "NOLGIA Grade\\Looks\\Print\\Kodak 2383 print warm timing NOLGIA 60%.dctl")
+        self.assertTrue(os.path.isfile(os.path.join(self.root, "NOLGIA Grade", "Looks", "Print",
+                                                    "Kodak 2383 print warm timing NOLGIA.cube")))
         self.assertEqual(result["cost"], "free: it ran in DaVinci Resolve")
 
     def test_a_second_grade_keeps_the_first(self):
@@ -513,12 +518,12 @@ class GraderTest(unittest.TestCase):
         self.assertEqual(self.items[2].versions, ["Version 1", "NOLGIA grade", "NOLGIA grade 2"])
 
     def test_change_look_only(self):
-        engine.Grader(self.ops).run(engine.validate_args({"clips": [1], "look": "warm-print"}))
-        out = engine.Grader(self.ops).run(engine.validate_args({"action": "look", "clips": [1], "look": "bw-pan-400",
+        engine.Grader(self.ops).run(engine.validate_args({"clips": [1], "look": "kodak-2383-print-warm"}))
+        out = engine.Grader(self.ops).run(engine.validate_args({"action": "look", "clips": [1], "look": "ilford-hp5-plus",
                                                                 "strength": 0.3}))
         self.assertEqual(len(out["changed"]), 1)
         self.assertEqual(self.items[0].nodes[6]["params"][drx.LUT_PATH],
-                         "NOLGIA Grade\\Looks\\Black and white\\B&W Pan 400 30%.dctl")
+                         "NOLGIA Grade\\Looks\\Black and white\\Ilford HP5 Plus NOLGIA 30%.dctl")
 
     def test_unknown_camera_asks(self):
         self.items[0].name = "interview.mov"
@@ -528,7 +533,7 @@ class GraderTest(unittest.TestCase):
 
     def test_looks_lists_the_library(self):
         out = engine.Grader(self.ops).run(engine.validate_args({"action": "looks"}))
-        self.assertEqual(len(out["looks"]), 24)
+        self.assertEqual(len(out["looks"]), len(looks.LOOKS))
 
 
 class GradeWindowTest(unittest.TestCase):
@@ -552,12 +557,12 @@ class GradeWindowTest(unittest.TestCase):
         window.show()
         tree = window.items["Looks"]
         self.assertEqual(tree.rows[0].Text[1], NO_LOOK)
-        self.assertEqual(len(tree.rows), 25)
-        tree.__dict__["current"] = 3  # Warm Print
+        self.assertEqual(len(tree.rows), 1 + len(looks.LOOKS))
+        tree.__dict__["current"] = 2  # Kodak 2383 print, warm timing
         window.items["Strength"].Value = 60
         window.items["Hero"].Value = 3
         args = engine.validate_args(window.args("apply"))
-        self.assertEqual((args["look"], args["strength"], args["match"]), ("warm-print", 0.6, 3))
+        self.assertEqual((args["look"], args["strength"], args["match"]), ("kodak-2383-print-warm", 0.6, 3))
 
 
 if __name__ == "__main__":
