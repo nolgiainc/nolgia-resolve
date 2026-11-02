@@ -567,3 +567,115 @@ class GradeWindowTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UserLutsTest(unittest.TestCase):
+    """0.3.1: the LUTs already on the computer, under their own names, at the strength dial; never copied."""
+
+    def setUp(self):
+        from nolgia_resolve.grading import userluts
+        self.U = userluts
+        self.root = tempfile.mkdtemp(prefix="nolgia-luts-")
+        self.cfg = tempfile.mkdtemp(prefix="nolgia-cfg-")
+        self.env = dict(os.environ)
+        os.environ["NOLGIA_LUT_DIR"] = self.root
+        os.environ["NOLGIA_CONFIG_DIR"] = self.cfg
+
+        def cube(rel, header="", size=2):
+            path = os.path.join(self.root, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            n = size - 1
+            rows = ["%f %f %f" % (r / n, g / n, b / n) for b in range(size) for g in range(size) for r in range(size)]
+            with open(path, "w") as handle:
+                handle.write(header + "LUT_3D_SIZE %d\n" % size + "\n".join(rows) + "\n")
+            return path
+        self.cube = cube
+        self.print_lut = cube("Film Looks/Rec709 Kodak 2383 D65.cube", "# Resolve Film Look LUT\n#   Input: Cineon Log\n")
+        cube("Film Looks/DCI-P3 Kodak 2383 D65.cube", "#   Input: Cineon Log\n")
+        cube("Sony/SLog3SGamut3.CineToLC-709.cube", "TITLE \"SLog3SGamut3.CineToLC_709\"\n")
+        cube("VFX IO/Linear to Cineon Log.cube")
+        cube("NOLGIA Grade/Looks/Print/x.cube")
+        cube("Blackmagic Design/Blackmagic 4.6K Film to Video v4.cube", "BMD_TITLE \"4.6K Film to Video\"\n")
+        self.mine = cube("My Pack/Film Emulation 5219.cube")
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self.env)
+        shutil.rmtree(self.root, ignore_errors=True)
+        shutil.rmtree(self.cfg, ignore_errors=True)
+
+    def test_detects_what_a_lut_takes(self):
+        d = self.U.detect_input
+        self.assertEqual(d("XH2S_FLog2_to_ETERNA_33grid", "")[0], "flog2")
+        self.assertEqual(d("FLog_FGamut_to_PROVIA", "")[0], "flog")
+        self.assertEqual(d("GFX100II_FLog2C_to_ETERNA", "")[0], "unsupported")
+        self.assertEqual(d("LogC4_to_Rec709", "")[0], "logc4")
+        self.assertEqual(d("x", "#   Input: Cineon Log\n")[0], "cineon")
+        self.assertEqual(d("Teal Summer", "")[0], "rec709")
+
+    def test_index_groups_and_skips(self):
+        found = {e["name"]: e for e in self.U.index()}
+        self.assertEqual(found["Rec709 Kodak 2383 D65"]["group"], self.U.INSTALLED)
+        self.assertEqual(found["Rec709 Kodak 2383 D65"]["input"], "cineon")
+        self.assertEqual(found["DCI-P3 Kodak 2383 D65"]["output"], "dci-p3")
+        self.assertEqual(found["SLog3SGamut3.CineToLC-709"]["input"], "slog3")
+        self.assertEqual(found["Blackmagic 4.6K Film to Video v4"]["input"], "unsupported")
+        self.assertEqual(found["Film Emulation 5219"]["group"], self.U.YOURS)
+        self.assertNotIn("Linear to Cineon Log", found)
+        self.assertNotIn("x", found)
+        extra = tempfile.mkdtemp(prefix="nolgia-extra-")
+        try:
+            with open(os.path.join(extra, "A_FLog2_to_ETERNA.cube"), "w") as handle:
+                handle.write("LUT_3D_SIZE 2\n" + "0 0 0\n" * 8)
+            self.U.save_folders([extra])
+            names = {e["name"]: e for e in self.U.index()}
+            self.assertEqual(names["A_FLog2_to_ETERNA"]["input"], "flog2")
+        finally:
+            shutil.rmtree(extra)
+
+    def test_the_wrapper_points_at_the_file_and_never_copies_it(self):
+        entry = self.U.find("Rec709 Kodak 2383 D65", self.U.index())
+        path = library.install_user_lut(self.root, entry, 0.6)
+        self.assertEqual(path, "NOLGIA Grade/LUTs at strength/Installed with DaVinci Resolve/Rec709 Kodak 2383 D65/"
+                               "Rec709 Kodak 2383 D65 60%.dctl")
+        with open(os.path.join(self.root, path), encoding="utf-8") as handle:
+            text = handle.read()
+        self.assertIn("DEFINE_LUT(lut, %s)" % self.print_lut.replace("\\", "/"), text)
+        self.assertIn("0.60", text)
+        self.assertEqual(text.count("{"), text.count("}"))
+        copies = [f for base, _d, files in os.walk(os.path.join(self.root, "NOLGIA Grade")) for f in files
+                  if f.endswith(".cube")]
+        self.assertEqual(copies, ["x.cube"])  # only the fixture's own file: nothing was copied in
+
+    def test_every_input_space_makes_a_dctl(self):
+        for space in self.U.INPUTS:
+            if space == "auto":
+                continue
+            text = dctl.lut_at_strength("C:/LUTs/a b.cube", space, 0.5, "a b")
+            self.assertEqual(text.count("{"), text.count("}"), space)
+            self.assertIn("DEFINE_LUT(lut, C:/LUTs/a b.cube)", text)
+
+    def test_python_twin(self):
+        ident = lambda rgb: list(rgb)
+        x = [C.di_encode(0.18), C.di_encode(0.3), C.di_encode(0.05)]
+        for space in ("dwg", "rec709"):
+            out = self.U.wrap_python(ident, space, 1.0)(x)
+            self.assertLess(max(abs(a - b) for a, b in zip(out, x)), 2e-4, space)
+        half = self.U.wrap_python(lambda rgb: [v + 0.1 for v in rgb], "dwg", 0.5)(x)
+        self.assertAlmostEqual(half[0], x[0] + 0.05, places=6)
+
+    def test_grade_with_a_lut(self):
+        items = [FakeItem("C_SLOG3.mov", 0, 48, (1.0, 1.0, 1.0), 0.0)]
+        ops = FakeOps(self.root, items)
+        ops.lut_folder = lambda: os.path.join(self.root, "NOLGIA")
+        out = engine.Grader(ops).run(engine.validate_args({"lut": "Rec709 Kodak 2383 D65", "strength": 0.6}))
+        self.assertEqual(out["lut"]["name"], "Rec709 Kodak 2383 D65")
+        self.assertEqual(items[0].nodes[6]["label"], "LOOK")
+        self.assertTrue(items[0].nodes[6]["params"][drx.LUT_PATH].endswith("Rec709 Kodak 2383 D65 60%.dctl"))
+        with self.assertRaises(CommandError):
+            engine.Grader(ops).run(engine.validate_args({"lut": "Blackmagic 4.6K Film to Video v4"}))
+        with self.assertRaises(CommandError):
+            engine.validate_args({"lut": "a", "look": "warm-print"})
+        listing = engine.Grader(ops).run(engine.validate_args({"action": "looks"}))
+        self.assertIn("Rec709 Kodak 2383 D65", [e["name"] for e in listing["installed_with_resolve"]])
+        self.assertIn("Film Emulation 5219", [e["name"] for e in listing["your_luts"]])
