@@ -110,7 +110,9 @@ credits: the plugin's own code does the work on your computer.
   camera log, which clips, a hero clip to match to, and **Correct and grade**.
   **Change look only** swaps the look or its strength on clips NOLGIA graded;
   **Add all looks to the LUT list** puts every look in Resolve's LUT browser.
-  It works without signing in.
+  The same list has the LUTs already on your computer (see below): **Add
+  folder** adds a folder of your own LUTs, **Open download page** opens a
+  maker's page for its free LUTs. It works without signing in.
 - Or ask NOLGIA Agent in plain words ("correct every clip and match them to
   clip 3, then give it a warm print look at 60%"), or your own agent through
   NOLGIA's MCP tools (the `grade` command, [`COMMANDS.md`](COMMANDS.md)). An
@@ -125,7 +127,8 @@ working on:
 
 - **CST IN** takes the camera's log to DaVinci Wide Gamut / DaVinci
   Intermediate: Sony S-Log3, ARRI LogC3 and LogC4, Panasonic V-Log, Canon Log
-  2 and 3, Blackmagic Film Gen 5, Apple Log (or Rec.709). Each is a DCTL from
+  2 and 3, Blackmagic Film Gen 5, Apple Log, and since 0.3.1 Fujifilm F-Log,
+  F-Log2 and F-Log2 C, DJI D-Log and Nikon N-Log (or Rec.709). Each is a DCTL from
   the maker's published curve and primaries; on a 144 patch chart they give
   the same picture as Resolve's own colour management (every camera within
   0.0014 in DaVinci Intermediate, the precision of a 16-bit still).
@@ -159,6 +162,27 @@ folder when first used. Resolve's own Film Looks LUTs stay Resolve's: NOLGIA can
 point a node at them on your computer and never copies them. Film stock and
 camera names are trademarks of their owners and describe the look each
 emulates. NOLGIA is not affiliated with or endorsed by them.
+
+**The film LUTs you already have** (0.3.1) sit in the same list, on the same
+strength dial, under their own names:
+
+- **Installed with DaVinci Resolve**: the LUTs that come with Resolve, such as
+  its Film Looks (Rec709 Kodak 2383 and Fujifilm 3513DI, at D55, D60 and D65)
+  and the camera makers' conversions.
+- **Your LUTs**: any other `.cube` in Resolve's LUT folders, and in folders you
+  add (**Add folder**, or `folders` for an agent).
+- **Free from the maker**: links to the makers' own free LUT pages (Fujifilm,
+  ARRI, Panasonic, RED, Nikon). NOLGIA links only; download them there, then
+  add their folder.
+
+NOLGIA never copies, ships or changes these files. The LOOK node gets a small
+DCTL that points at your file, takes the clip to what the LUT expects (Cineon
+for Resolve's Film Looks, a camera log, or Rec.709), applies it and mixes it at
+the strength you set. What a LUT takes in is read from its header, title or
+file name (a LUT that names nothing is taken as a Rec.709 look; an agent can
+say otherwise with `lut_input`). A LUT for a log NOLGIA cannot convert yet is
+left out of the list, and one whose path has a bracket, comma, semicolon or
+quote is refused by name (see Known limits).
 
 ## Settings
 
@@ -223,7 +247,7 @@ of the timeline (Resolve's own API numbers frames from the start timecode,
 | `save` | none | saves the open project: `{project, saved}` |
 | `open` | `project`, `folder?` | opens another project: `{project, folder}`. With the NOLGIA window open it always asks you first (Resolve cannot tell whether there are unsaved changes). |
 | `dit` | `subcommand` (`offload`, `verify`, `manifest`, `inventory`, `rename`, `undo`, `report`) and its fields, or `action: "status"`/`"cancel"` with `job_id` | camera-card DIT through the NOLGIA CLI, the same contract as the Adobe plugin's (see above). Writes (`offload`, `rename` with `apply`, `undo`) are planned with the CLI's dry run and wait for your Approve in the NOLGIA window; with no window open they do not run. It hands back a job within about 2 s so Resolve's window stays responsive; follow it with `status`. Workflow: `presets/resolve/dit.md`. |
-| `grade` | `action` (`apply`, `look`, `looks`, `inspect`), `clips`, `camera`, `match`, `look`, `strength`, `contrast`, `saturation`, `skin` | colour management, measured white balance and exposure, matching to a hero clip and a library look at a strength, as eight labelled nodes in a new color version of each clip (see Colour grading). `apply` and `look` wait for the person's Grade clips click in the NOLGIA window. Free. |
+| `grade` | `action` (`apply`, `look`, `looks`, `inspect`), `clips`, `camera`, `match`, `look` or `lut` (with `lut_input?`, `folders?`), `strength`, `contrast`, `saturation`, `skin` | colour management, measured white balance and exposure, matching to a hero clip and a library look or a LUT on this computer at a strength, as eight labelled nodes in a new color version of each clip (see Colour grading). `apply` and `look` wait for the person's Grade clips click in the NOLGIA window. Free. |
 
 **LUTs.** NOLGIA's film-look color presets come from the API it uses
 (`GET /color-presets`, public). `import_asset` installs a LUT into a `NOLGIA`
@@ -301,6 +325,15 @@ the project since it was last saved.
   the BALANCE and EXPOSURE nodes for you to adjust. In colour managed and ACES
   projects nothing is measured, and SKIN is left empty in ACES. While a grade
   runs (a few seconds a clip) the NOLGIA window does not answer.
+- LUTs on the computer (0.3.1): DaVinci Resolve 21.1.1 stops with an "Error
+  Processing DaVinci CTL" dialog, which holds Resolve until someone clicks OK,
+  on a DCTL whose `DEFINE_LUT` path has a bracket or a comma in it. So NOLGIA
+  refuses a LUT whose folder or file name has a bracket, comma, semicolon or
+  quote, and says which: move or rename it. A LUT for a log NOLGIA has no
+  transform for (DJI D-Log M, RED Log3G10, Leica L-Log, OM-Log, HLG, PQ, the
+  older Blackmagic Film) is left out rather than guessed, and so are the
+  DCI-P3 versions of Resolve's Film Looks. In a colour managed project only a
+  LUT for the working space goes on LOOK; in ACES only one for ACEScct.
 - Resolve's scripting cannot tell whether a project has unsaved changes, so
   `info` says `unsaved_changes: null`, and `open` asks you first.
 - Commands run one at a time on the NOLGIA script's own thread, the only one
@@ -382,6 +415,21 @@ the project since it was last saved.
   stays as it was before 0.2.3.
 
 ## Tested on
+
+0.3.1 (November 2, 2026): the film LUTs already on the computer. Run in
+DaVinci Resolve Studio 21.1.1 on Windows 11: the list read from Resolve's LUT
+folder (its Film Looks and the camera makers' LUTs that come with it) and from
+a folder added with Add folder; Resolve's Rec709 Kodak 2383 D65 and Fujifilm
+3513DI D65 and Sony's SLog3SGamut3.CineToCine+709 on three S-Log3 clips, and a
+LUT from the added folder at 90% with Change look only; the strength DCTL on
+the 2383 and 3513DI at 100% and 50% against a Python reading of the same
+`.cube` on a 144 patch chart (mean difference 0.0005, max 0.0015, one saturated
+patch 0.009); the new camera transforms (F-Log, F-Log2, F-Log2 C, D-Log,
+N-Log) against Resolve's own colour management (within 0.0014); and a DCTL
+pointing at a path with a bracket or a comma, which Resolve 21.1.1 stops on
+with an error dialog (so NOLGIA refuses those paths). Not yet run on macOS or
+Linux, and not yet against the real NOLGIA API (`lut`, `lut_input` and
+`folders` for `nolgia_app_grade` are waiting for review).
 
 0.3.0 (November 2, 2026): colour grading (the `grade` command and the NOLGIA
 Grade window). Run in DaVinci Resolve Studio 21.1.1 on Windows 11 (Python
