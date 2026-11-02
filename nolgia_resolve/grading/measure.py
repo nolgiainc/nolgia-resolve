@@ -7,7 +7,7 @@ ExportCurrentFrameAsStill writes a .tif as uncompressed 16-bit RGB in one strip
 Intermediate (the grade's working space, after CST IN) and measured in scene
 light:
   * white: the median red, green and blue of the least saturated 30 percent of
-    the pixels between the 40th and 97th brightness percentile, which is what
+    the pixels between the 70th and 97th brightness percentile, which is what
     should be white or grey (shirts, walls, paper, sky);
   * key: the geometric mean brightness between the 20th and 95th percentile.
 """
@@ -72,6 +72,12 @@ def _median(values):
     return _percentile(sorted(values), 0.5)
 
 
+def _saturation_709(lin):
+    rgb = [max(v, 0.0) for v in C.mat_vec(C.DWG_TO_709, lin)]
+    top = max(rgb)
+    return (top - min(rgb)) / top if top > 0 else 1.0
+
+
 def measure(grid_di):
     """Stats of a frame in DaVinci Intermediate: white (linear r, g, b), key (linear), clip share."""
     wr, wg, wb = C.npm(*C.GAMUTS["dwg"])[1]
@@ -89,15 +95,17 @@ def measure(grid_di):
     if len(pixels) < 50:
         return {"ok": False, "why": "the frame is almost all black or clipped"}
     lum = sorted(p[0] for p in pixels)
-    lo, hi = _percentile(lum, 0.40), _percentile(lum, 0.97)
+    lo, hi = _percentile(lum, 0.70), _percentile(lum, 0.97)
     band = [lin for y, lin in pixels if lo <= y <= hi and min(lin) > 0]
-    band.sort(key=lambda lin: (max(lin) - min(lin)) / max(lin))
+    # Rank neutrality on Rec.709 primaries: in DaVinci Wide Gamut skin is barely saturated and could pass for a
+    # white with a camera's cast; on Rec.709 primaries it clearly cannot.
+    band.sort(key=_saturation_709)
     whites = band[:max(10, int(len(band) * 0.3))]
     white = [_median([lin[k] for lin in whites]) for k in range(3)]
     k_lo, k_hi = _percentile(lum, 0.20), _percentile(lum, 0.95)
     mids = [y for y in lum if k_lo <= y <= k_hi]
     key = math.exp(sum(math.log(y) for y in mids) / len(mids))
-    white_sat = _median([(max(l) - min(l)) / max(l) for l in whites])
+    white_sat = _median([_saturation_709(l) for l in whites])
     out = {"ok": True, "white": white, "white_y": wr * white[0] + wg * white[1] + wb * white[2], "key": key,
            "white_saturation": white_sat, "clipped": clipped / float(len(grid_di)), "samples": len(pixels)}
     # Find skin on the picture with its white cast taken out, so a cast does not change which pixels count.

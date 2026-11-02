@@ -653,8 +653,8 @@ class Grader(object):
                     "white_level": round(st["white_y"], 4), "white_saturation": round(st["white_saturation"], 3),
                     "skin_level": round(st.get("skin_y", 0), 4), "key": round(st["key"], 4)}
             if max(abs(b) for b in residual_bal) > 0.03 or abs(residual_exp) > 0.03:
-                bal = [b + r for b, r in zip(bal, residual_bal)]
-                exp = exp + residual_exp
+                bal = [max(-MAX_BALANCE_STOPS, min(MAX_BALANCE_STOPS, b + r)) for b, r in zip(bal, residual_bal)]
+                exp = max(-MAX_EXPOSURE_STOPS, min(MAX_EXPOSURE_STOPS, exp + residual_exp))
                 camera = cameras[n][0] or "rec709"
                 self.apply_nodes(item, self.tree(camera, science, bal, exp, args, look_path), facts, folder, "fix%d" % n)
                 results[n]["balance_stops"] = [round(b, 3) for b in bal]

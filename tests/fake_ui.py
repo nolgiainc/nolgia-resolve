@@ -24,6 +24,14 @@ KNOWN_PROPS = {
     "TextEdit": {"ID", "PlainText", "HTML", "ReadOnly", "Font", "LineWrapMode", "Lexer", "Weight", "Hidden",
                  "Enabled", "PlaceholderText", "MinimumSize", "MaximumSize", "FocusPolicy", "StyleSheet"},
     "Timer": {"ID", "Interval", "SingleShot"},
+    # The NOLGIA Grade window's controls: seen working in Resolve 21.1.1's
+    # UIManager on Windows 11 (2026-11-02), driven by posted clicks: a Slider
+    # (Minimum, Maximum, Value, Orientation; ValueChanged), a ComboBox
+    # (AddItem, CurrentIndex), a SpinBox (Minimum, Maximum, Value,
+    # SpecialValueText at Minimum) and a Tree's CurrentItem().
+    "Slider": {"ID", "Minimum", "Maximum", "Value", "Orientation", "FocusPolicy", "Weight"},
+    "ComboBox": {"ID", "FocusPolicy", "Weight"},
+    "SpinBox": {"ID", "Minimum", "Maximum", "Value", "FocusPolicy", "SpecialValueText", "Weight"},
     "VGroup": {"Spacing", "Weight"},
     "HGroup": {"Spacing", "Weight"},
 }
@@ -79,6 +87,8 @@ class Element:
             return ""
         if name in ("Checked", "Hidden"):
             return False
+        if name in ("Value", "CurrentIndex"):
+            return 0
         raise AttributeError(name)
 
     def __setattr__(self, name, value):
@@ -112,6 +122,14 @@ class Element:
     def AddTopLevelItem(self, item):
         self.rows.append(item)
 
+    def CurrentItem(self):
+        index = self.__dict__.get("current")
+        return self.rows[index] if index is not None and index < len(self.rows) else None
+
+    # ComboBox
+    def AddItem(self, text):
+        self.rows.append(text)
+
     # Timer
     def Start(self):
         self.__dict__["started"] = True
@@ -128,6 +146,7 @@ class Element:
 class TreeItem:
     def __init__(self):
         self.Text = {}
+        self.ToolTip = {}
 
 
 class Window:
@@ -193,6 +212,9 @@ class UIManager:
     Tree = _factory("Tree")
     TextEdit = _factory("TextEdit")
     Timer = _factory("Timer")
+    Slider = _factory("Slider")
+    ComboBox = _factory("ComboBox")
+    SpinBox = _factory("SpinBox")
     VGroup = _factory("VGroup")
     HGroup = _factory("HGroup")
 
