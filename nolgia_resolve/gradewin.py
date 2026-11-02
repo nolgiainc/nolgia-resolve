@@ -102,7 +102,7 @@ class GradeWindow(object):
         tree = items["Looks"]
         tree.ColumnCount = 3
         tree.SetHeaderLabels(["Family", "Look", "What it does"])
-        for column, width in enumerate((110, 150, 320)):
+        for column, width in enumerate((190, 190, 420)):
             tree.ColumnWidth[column] = width
         row = tree.NewItem()
         row.Text[0] = ""

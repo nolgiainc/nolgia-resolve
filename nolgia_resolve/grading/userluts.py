@@ -141,6 +141,8 @@ def detect_input(name, header):
         for space, patterns in KEYS:
             if any(re.search(p, part) for p in patterns):
                 return space, how
+        if how != "its comments" and re.search(r"(?<![a-z])log(?![a-z])", part):
+            return "unsupported", how  # a camera log NOLGIA has no transform for (L-Log, OM-Log, Samsung Log...)
         if how != "its comments" and re.search(r"rec\.?\s?709|bt\.?709|\b709\b", part):
             return "rec709", how
     return "rec709", "assumed: nothing in the LUT names a log input, so it is taken as a Rec.709 look"

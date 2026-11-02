@@ -615,6 +615,9 @@ class UserLutsTest(unittest.TestCase):
         self.assertEqual(d("LogC4_to_Rec709", "")[0], "logc4")
         self.assertEqual(d("x", "#   Input: Cineon Log\n")[0], "cineon")
         self.assertEqual(d("Teal Summer", "")[0], "rec709")
+        self.assertEqual(d("Leica L-Log to Rec.709", "")[0], "unsupported")  # a log with no transform here
+        self.assertEqual(d("Olympus OM-Log400_to_BT.709", "")[0], "unsupported")
+        self.assertEqual(d("Catalog Warm", "")[0], "rec709")
 
     def test_index_groups_and_skips(self):
         found = {e["name"]: e for e in self.U.index()}
