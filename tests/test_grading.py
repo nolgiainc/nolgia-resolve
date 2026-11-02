@@ -689,3 +689,37 @@ class UserLutsTest(unittest.TestCase):
         listing = engine.Grader(ops).run(engine.validate_args({"action": "looks"}))
         self.assertIn("Rec709 Kodak 2383 D65", [e["name"] for e in listing["installed_with_resolve"]])
         self.assertIn("Film Emulation 5219", [e["name"] for e in listing["your_luts"]])
+
+    def test_window_add_folder_lists_once(self):
+        import fake_ui
+        from nolgia_resolve.gradewin import GradeWindow
+
+        class Panel(object):
+            def __init__(self):
+                self.ui = fake_ui.UIManager()
+                self.disp = fake_ui.Dispatcher(self.ui)
+                self.log = lambda message: None
+
+            def _guard(self, fn):
+                return fn
+
+            def _click(self, element_id, fn):
+                return fn
+
+        window = GradeWindow(Panel())
+        window.show()
+        tree = window.items["Looks"]
+        before = len(tree.rows)
+        extra = tempfile.mkdtemp(prefix="nolgia-mine-")
+        try:
+            with open(os.path.join(extra, "Warm Dusk.cube"), "w") as handle:
+                handle.write("LUT_3D_SIZE 2\n" + "0 0 0\n" * 8)
+            window.items["Folder"].Text = extra
+            window._add_folder()
+            families = [row.Text[0] for row in tree.rows]
+            self.assertEqual(len(tree.rows), before + 1)
+            self.assertEqual(families.count("Free from the maker"), len(self.U.OFFICIAL))
+            self.assertEqual(families[-len(self.U.OFFICIAL):], ["Free from the maker"] * len(self.U.OFFICIAL))
+            self.assertIn(("Your LUTs", "Warm Dusk"), [(row.Text[0], row.Text[1]) for row in tree.rows])
+        finally:
+            shutil.rmtree(extra)

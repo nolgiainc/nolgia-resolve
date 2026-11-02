@@ -97,28 +97,14 @@ class GradeWindow(object):
                       "MinimumSize": [0, 36]}),
         ])
         self.win = self.disp.AddWindow({"ID": GRADE_ID, "WindowTitle": "NOLGIA Grade",
-                                        "Geometry": [580, 80, 620, 760], "MinimumSize": [520, 600]}, layout)
+                                        "Geometry": [480, 80, 860, 760], "MinimumSize": [520, 600]}, layout)
         items = self.items = self.win.GetItems()
         tree = items["Looks"]
         tree.ColumnCount = 3
         tree.SetHeaderLabels(["Family", "Look", "What it does"])
-        for column, width in enumerate((190, 190, 420)):
+        for column, width in enumerate((200, 230, 600)):
             tree.ColumnWidth[column] = width
-        row = tree.NewItem()
-        row.Text[0] = ""
-        row.Text[1] = NO_LOOK
-        row.Text[2] = "Colour management and correction, no look."
-        tree.AddTopLevelItem(row)
-        self.rows = [("none", None)]
-        for look in looks.LOOKS:
-            row = tree.NewItem()
-            row.Text[0] = look.family
-            row.Text[1] = look.name
-            row.Text[2] = look.description
-            row.ToolTip[2] = look.description
-            tree.AddTopLevelItem(row)
-            self.rows.append(("look", look.slug))
-        self._add_lut_rows()
+        self._fill_tree()
         for _key, label in CAMERAS:
             items["Camera"].AddItem(label)
         for _key, label in SCOPES:
@@ -138,6 +124,26 @@ class GradeWindow(object):
 
     def _on_strength(self, ev):
         self.items["StrengthValue"].Text = "%d%%" % int(self.items["Strength"].Value)
+
+    def _fill_tree(self):
+        """NOLGIA's looks, then Resolve's own LUTs and the person's, then the makers' free LUTs."""
+        tree = self.items["Looks"]
+        tree.Clear()
+        row = tree.NewItem()
+        row.Text[0] = ""
+        row.Text[1] = NO_LOOK
+        row.Text[2] = "Colour management and correction, no look."
+        tree.AddTopLevelItem(row)
+        self.rows = [("none", None)]
+        for look in looks.LOOKS:
+            row = tree.NewItem()
+            row.Text[0] = look.family
+            row.Text[1] = look.name
+            row.Text[2] = look.description
+            row.ToolTip[2] = look.description
+            tree.AddTopLevelItem(row)
+            self.rows.append(("look", look.slug))
+        self._add_lut_rows()
 
     def _add_lut_rows(self, entries=None):
         """Resolve's own LUTs and the person's, under their own names, then the makers' free LUTs to download."""
@@ -230,7 +236,7 @@ class GradeWindow(object):
             return
         userluts.save_folders(userluts.extra_folders() + [folder])
         found = userluts.index(lut_dirs=[], folders=[folder])
-        self._add_lut_rows(found)
+        self._fill_tree()  # the whole list again, so the makers' rows stay once and at the end
         self.items["Folder"].Text = ""
         self._status("Added %s: %d LUT%s, now under Your LUTs." % (folder, len(found), "" if len(found) == 1 else "s"))
 
