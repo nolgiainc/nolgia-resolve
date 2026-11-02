@@ -13,7 +13,7 @@ import uuid
 
 from .core.commands import CommandError
 from .grading import colour as C
-from .grading import engine, looks
+from .grading import engine, looks, userluts
 
 GRADE_ID = "com.nolgia.resolve.grade"
 NO_FOCUS = {"NoFocus": True}
@@ -54,6 +54,12 @@ class GradeWindow(object):
             ui.Label({"Text": "Film look library", "Font": bold, "Weight": 0}),
             ui.Tree({"ID": "Looks", "Weight": 1, "RootIsDecorated": False, "AlternatingRowColors": True,
                      "SelectionMode": "SingleSelection", "FocusPolicy": NO_FOCUS}),
+            ui.HGroup({"Weight": 0}, [
+                ui.LineEdit({"ID": "Folder", "PlaceholderText": "Add a folder of your LUTs (paste its path)",
+                             "FocusPolicy": {"ClickFocus": True}}),
+                ui.Button({"ID": "AddFolder", "Text": "Add folder", "Weight": 0, "FocusPolicy": NO_FOCUS}),
+                ui.Button({"ID": "OpenPage", "Text": "Open download page", "Weight": 0, "FocusPolicy": NO_FOCUS}),
+            ]),
             ui.HGroup({"Weight": 0}, [
                 ui.Label({"Text": "Strength", "Weight": 0, "MinimumSize": [90, 0]}),
                 ui.Slider({"ID": "Strength", "Minimum": 0, "Maximum": 100, "Value": 100, "Orientation": "Horizontal",
@@ -103,6 +109,7 @@ class GradeWindow(object):
         row.Text[1] = NO_LOOK
         row.Text[2] = "Colour management and correction, no look."
         tree.AddTopLevelItem(row)
+        self.rows = [("none", None)]
         for look in looks.LOOKS:
             row = tree.NewItem()
             row.Text[0] = look.family
@@ -110,6 +117,8 @@ class GradeWindow(object):
             row.Text[2] = look.description
             row.ToolTip[2] = look.description
             tree.AddTopLevelItem(row)
+            self.rows.append(("look", look.slug))
+        self._add_lut_rows()
         for _key, label in CAMERAS:
             items["Camera"].AddItem(label)
         for _key, label in SCOPES:
@@ -120,6 +129,8 @@ class GradeWindow(object):
         on.Apply.Clicked = click("Apply", lambda ev: self._run("apply"))
         on.LookOnly.Clicked = click("LookOnly", lambda ev: self._run("look"))
         on.InstallAll.Clicked = click("InstallAll", lambda ev: self._install_all())
+        on.AddFolder.Clicked = click("AddFolder", lambda ev: self._add_folder())
+        on.OpenPage.Clicked = click("OpenPage", lambda ev: self._open_page())
         on[GRADE_ID].Close = self.panel._guard(lambda ev: self.hide())
         return self.win
 
@@ -128,15 +139,62 @@ class GradeWindow(object):
     def _on_strength(self, ev):
         self.items["StrengthValue"].Text = "%d%%" % int(self.items["Strength"].Value)
 
-    def selected_look(self):
+    def _add_lut_rows(self, entries=None):
+        """Resolve's own LUTs and the person's, under their own names, then the makers' free LUTs to download."""
+        tree = self.items["Looks"]
+        if entries is None:
+            try:
+                entries = userluts.index()
+            except Exception as err:  # a folder that cannot be read never breaks the window
+                self.panel.log("Could not list the LUTs on this computer: %s" % err)
+                entries = []
+        for e in entries:
+            if e["input"] == "unsupported" or e.get("output") == "dci-p3":
+                continue
+            row = tree.NewItem()
+            row.Text[0] = e["group"]
+            row.Text[1] = e["name"]
+            row.Text[2] = "%s. Takes %s. Your file: %s" % (e["folder"] or "LUT", e["input"], e["path"])
+            row.ToolTip[2] = row.Text[2]
+            tree.AddTopLevelItem(row)
+            self.rows.append(("lut", e))
+        for item in userluts.OFFICIAL:
+            row = tree.NewItem()
+            row.Text[0] = "Free from the maker"
+            row.Text[1] = item["name"]
+            row.Text[2] = "%s Open download page, save it, then add its folder." % item["what"]
+            row.ToolTip[2] = item["url"]
+            tree.AddTopLevelItem(row)
+            self.rows.append(("official", item))
+
+    def _selected_row(self):
         row = self.items["Looks"].CurrentItem()
         if row is None:
             return None
-        name = row.Text[1]
+        name, family = row.Text[1], row.Text[0]
         if name == NO_LOOK:
+            return ("none", None)
+        for kind, value in self.rows:
+            if kind == "look" and looks.BY_SLUG[value].name == name:
+                return kind, value
+            if kind == "lut" and value["name"] == name and value["group"] == family:
+                return kind, value
+            if kind == "official" and value["name"] == name and family == "Free from the maker":
+                return kind, value
+        return None
+
+    def selected_look(self):
+        sel = self._selected_row()
+        if sel is None:
+            return None
+        kind, value = sel
+        if kind == "none":
             return "none"
-        found = looks.find(name)
-        return found.slug if found else None
+        if kind == "look":
+            return value
+        if kind == "lut":
+            return {"lut": value["path"]}
+        return {"official": value}
 
     def args(self, action):
         it = self.items
@@ -150,11 +208,41 @@ class GradeWindow(object):
         if hero:
             out["match"] = hero
         look = self.selected_look()
-        if look:
+        if isinstance(look, dict) and "official" in look:
+            raise CommandError("%s is a maker's free download: Open download page, save it, add its folder, then "
+                               "pick it under Your LUTs." % look["official"]["name"])
+        if isinstance(look, dict):
+            out["lut"] = look["lut"]
+        elif look:
             out["look"] = look
         elif action == "look":
             raise CommandError("Pick a look in the list first (or No look).")
         return out
+
+    def _add_folder(self):
+        import os
+        folder = (self.items["Folder"].Text or "").strip().strip('"')
+        if not folder:
+            self._status("Paste the path of a folder with your LUTs in the box, then Add folder.")
+            return
+        if not os.path.isdir(folder):
+            self._status("There is no folder %s on this computer." % folder)
+            return
+        userluts.save_folders(userluts.extra_folders() + [folder])
+        found = userluts.index(lut_dirs=[], folders=[folder])
+        self._add_lut_rows(found)
+        self.items["Folder"].Text = ""
+        self._status("Added %s: %d LUT%s, now under Your LUTs." % (folder, len(found), "" if len(found) == 1 else "s"))
+
+    def _open_page(self):
+        sel = self._selected_row()
+        if not sel or sel[0] != "official":
+            self._status("Pick one of the makers' free LUTs in the list first (Free from the maker).")
+            return
+        opener = getattr(self.panel, "_open", None)
+        if opener:
+            opener(sel[1]["url"])
+        self._status("Opened %s in your browser. Save the LUTs, then add their folder here." % sel[1]["url"])
 
     # ......................................................... running
 
@@ -215,6 +303,8 @@ def summary(result, action, seconds):
         n = len(result.get("changed") or [])
         look = looks.BY_SLUG.get(result.get("look") or "")
         what = "%s at %d%%" % (look.name, round((result.get("strength") or 1) * 100)) if look else "no look"
+        if result.get("user_lut"):
+            what = "%s at %d%%" % (result["user_lut"]["name"], round((result.get("strength") or 1) * 100))
         text = "Set %s on %d clip%s." % (what, n, "" if n == 1 else "s")
         if result.get("skipped"):
             text += " Skipped %d: %s." % (len(result["skipped"]), result["skipped"][0].get("why"))
@@ -226,6 +316,8 @@ def summary(result, action, seconds):
         parts.append("matched to clip %d" % result["hero"])
     if look:
         parts.append("%s at %d%%" % (look.name, round((result.get("strength") or 1) * 100)))
+    elif result.get("lut"):
+        parts.append("%s at %d%%" % (result["lut"]["name"], round((result.get("strength") or 1) * 100)))
     text = ", ".join(parts) + "."
     moved = ["clip %d: exposure %+.2f stop" % (c["clip"], c.get("exposure_stops") or 0) for c in clips
              if abs(c.get("exposure_stops") or 0) >= 0.05]

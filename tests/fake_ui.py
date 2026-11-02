@@ -32,6 +32,7 @@ KNOWN_PROPS = {
     "Slider": {"ID", "Minimum", "Maximum", "Value", "Orientation", "FocusPolicy", "Weight"},
     "ComboBox": {"ID", "FocusPolicy", "Weight"},
     "SpinBox": {"ID", "Minimum", "Maximum", "Value", "FocusPolicy", "SpecialValueText", "Weight"},
+    "LineEdit": {"ID", "Text", "PlaceholderText", "FocusPolicy", "Weight"},
     "VGroup": {"Spacing", "Weight"},
     "HGroup": {"Spacing", "Weight"},
 }
@@ -215,6 +216,7 @@ class UIManager:
     Slider = _factory("Slider")
     ComboBox = _factory("ComboBox")
     SpinBox = _factory("SpinBox")
+    LineEdit = _factory("LineEdit")
     VGroup = _factory("VGroup")
     HGroup = _factory("HGroup")
 
