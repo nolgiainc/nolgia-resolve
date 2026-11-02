@@ -171,7 +171,11 @@ def describe(args, caller="NOLGIA Agent"):
         lines.append("Look: none (the LOOK node is switched off).")
     lines.append("Every step lands as labelled nodes you can adjust. Each clip gets a new color version, "
                  "\"NOLGIA grade\"; your own grade stays in the clip's Versions menu.")
-    lines.append("It runs in DaVinci Resolve on this computer and costs no NOLGIA credits.")
+    if "NOLGIA Agent" in (caller or ""):
+        lines.append("The grading runs in DaVinci Resolve on this computer and costs no NOLGIA credits; the NOLGIA "
+                     "Agent turn that asked for it is billed as usual.")
+    else:
+        lines.append("It runs in DaVinci Resolve on this computer and costs no NOLGIA credits.")
     title = "%s wants to grade clips in DaVinci Resolve" % caller
     return title, lines
 
@@ -361,7 +365,8 @@ class Grader(object):
             drx.Node(LABELS[2], offset=[exposure * unit] * 3),
             drx.Node(LABELS[3], contrast=args.get("contrast", 1.0), pivot=PIVOT_DI),
             drx.Node(LABELS[4], saturation=args.get("saturation", 1.0)),
-            drx.Node(LABELS[5], lut=library.rel(library.SKIN_FILE) if args.get("skin", True) else None),
+            # The skin DCTL works in DWG/DI: an ACES project's nodes are in ACEScct, so SKIN stays empty there.
+            drx.Node(LABELS[5], lut=library.rel(library.SKIN_FILE) if args.get("skin", True) and science != "aces" else None),
             drx.Node(LABELS[6], lut=look_path),
             drx.Node(LABELS[7], lut=cst_out),
         ]
@@ -531,9 +536,17 @@ class Grader(object):
                "clips": [results[n] for n, _ in clips], "hero": args["match"], "seconds": round(time.time() - started, 1),
                "look": args["look"], "strength": args["strength"] if args["look"] not in (None, "none") else None,
                "lut_folder": os.path.join(root, library.SUBFOLDER), "cost": "free: it ran in DaVinci Resolve"}
+        if science == "rcm":
+            space = str(call(project, "GetSetting", "colorSpaceTimeline", default="") or "")
+            if space and "DaVinci WG" not in space and "DaVinci Wide Gamut" not in space:
+                out["warning"] = ("The timeline colour space is %s. NOLGIA's looks are made for DaVinci WG/Intermediate: "
+                                  "set it in Project Settings > Color Management, or use a project that is not colour "
+                                  "managed, for the looks to look as they should." % space)
         if science != "yrgb":
             out["note"] = ("The project is colour managed (%s), so CST IN and CST OUT are left to Resolve and "
-                           "correction was not measured; the look matches the project's working space." % mode)
+                           "correction was not measured; the look matches the project's working space%s." % (
+                               mode, " (ACEScct), and SKIN is left empty, as it works in DaVinci Wide Gamut"
+                               if science == "aces" else ""))
         return out
 
     def corrections(self, clips, stats, args, prefer=None):

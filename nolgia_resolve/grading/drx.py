@@ -40,6 +40,8 @@ TRACK_BODY = bytes.fromhex(
     "b3c49d0d1a2020be0128b401380140554a00520c0a0a08818080800c1202100260ff99e2ce06")
 
 NODE_SPACING = 240
+ROW_SPACING = 230
+ROW_LENGTH = 4
 
 
 def _varint(value):
@@ -183,6 +185,12 @@ class Node(object):
         return out
 
 
+def node_position(i, count):
+    """Rows of four, left to right, so the whole tree shows in a normal node editor at Resolve's own zoom."""
+    row, col = divmod(i - 1, ROW_LENGTH if count > ROW_LENGTH + 1 else count)
+    return 190 + NODE_SPACING * col, 180 + ROW_SPACING * row
+
+
 def graph_body(nodes, width=1920, height=1080):
     """The clip grade message for serial nodes, in order."""
     res = [(1, 0, width), (2, 0, height), (3, 5, struct.pack("<f", 1.0)), (4, 0, width), (5, 0, height),
@@ -190,7 +198,8 @@ def graph_body(nodes, width=1920, height=1080):
     g = [(1, 0, 1), (2, 0, 1), (3, 2, res)]
     for i, node in enumerate(nodes, start=1):
         grade = [(1, 0, 1)] + [param(*p) for p in node.params()]
-        fields = [(1, 0, i), (2, 0, i), (4, 0, 190 + NODE_SPACING * (i - 1)), (5, 0, 180)]
+        x, y = node_position(i, len(nodes))
+        fields = [(1, 0, i), (2, 0, i), (4, 0, x), (5, 0, y)]
         if node.label:
             fields.append((6, 2, node.label.encode("utf-8")))
         fields += [(7, 0, 1), (8, 0, 44),
