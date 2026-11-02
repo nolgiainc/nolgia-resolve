@@ -557,7 +557,8 @@ class GradeWindowTest(unittest.TestCase):
         window.show()
         tree = window.items["Looks"]
         self.assertEqual(tree.rows[0].Text[1], NO_LOOK)
-        self.assertEqual(len(tree.rows), 1 + len(looks.LOOKS))
+        from nolgia_resolve.grading import userluts
+        self.assertEqual(len(tree.rows), 1 + len(looks.LOOKS) + len(userluts.OFFICIAL))
         tree.__dict__["current"] = 2  # Kodak 2383 print, warm timing
         window.items["Strength"].Value = 60
         window.items["Hero"].Value = 3
