@@ -14,7 +14,7 @@ from .util import parse_time, cut_text
 
 # Every kind this plugin implements, in the order the spec lists them. The
 # plugin advertises exactly these in `capabilities`.
-CAPABILITIES = ("info", "run", "preview", "import_asset", "export", "save", "open", "dit", "grade")
+CAPABILITIES = ("info", "run", "preview", "import_asset", "export", "save", "open", "dit", "grade", "grade_lut")
 
 EXPORT_FORMATS = ("png", "mp4")
 LUT_TARGETS = ("current", "selected", "current_track", "all")
@@ -264,7 +264,7 @@ def validate(kind, args):
             return validate_args(args)
         except DitError as err:
             raise CommandError(str(err))
-    elif kind == "grade":
+    elif kind in ("grade", "grade_lut"):
         from ..grading.engine import validate_args as validate_grade
         return validate_grade(args)
     return out

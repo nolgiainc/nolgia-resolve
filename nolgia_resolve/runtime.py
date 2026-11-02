@@ -487,7 +487,7 @@ class Controller:
             return self.ops.open_approval(command)
         if command.kind == "dit":
             return self.ops.dit_approval(command, ticket.prepared)
-        if command.kind == "grade":
+        if command.kind in ("grade", "grade_lut"):
             return self.ops.grade_approval(command)
         return None
 

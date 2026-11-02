@@ -261,7 +261,10 @@ NOLGIA graded, found by its label, leaving every other node as it is; `none`
 switches the node off. Result: `{look, user_lut, strength, lut, changed,
 skipped}`.
 
-**A LUT on this computer (`lut`, 0.3.1).** NOLGIA never copies, ships or
+**A LUT on this computer (`lut`, 0.3.1).** The command kind `grade_lut` is
+`grade` with the same arguments; NOLGIA's API sends `grade_lut` when `lut`,
+`lut_input` or `folders` is given, so a 0.3.0 plugin (which does not have the
+kind) refuses it instead of grading without the LUT. NOLGIA never copies, ships or
 changes the file: it writes a small DCTL in `NOLGIA Grade/LUTs at strength`
 that points at the file (`DEFINE_LUT` with its full path), takes the clip from
 DaVinci Wide Gamut / Intermediate to what the LUT takes in (Cineon for

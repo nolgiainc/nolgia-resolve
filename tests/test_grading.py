@@ -285,6 +285,14 @@ class ArgsTest(unittest.TestCase):
                          ([1, 3], 3, "kodak-2383-print-warm", 0.6, "slog3"))
         self.assertEqual(engine.validate_args({"look": "warm-print"})["look"], "kodak-2383-print-warm")  # old slug
 
+    def test_grade_lut_kind(self):
+        from nolgia_resolve.core.commands import CAPABILITIES
+        from nolgia_resolve.ops import Ops
+        self.assertIn("grade_lut", CAPABILITIES)  # NOLGIA's API sends a LUT grade only to a plugin with this kind
+        args = validate("grade_lut", {"lut": "Rec709 Kodak 2383 D65", "strength": 50})
+        self.assertEqual((args["lut"], args["strength"]), ("Rec709 Kodak 2383 D65", 0.5))
+        self.assertTrue(callable(getattr(Ops, "do_grade_lut", None)))
+
     def test_refusals(self):
         for bad in ({"action": "paint"}, {"look": "Kodak 2383"}, {"strength": 300}, {"clips": [0]}, {"match": "3"},
                     {"camera": "red"}, {"action": "look"}, {"contrast": 5}):

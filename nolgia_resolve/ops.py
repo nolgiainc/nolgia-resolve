@@ -760,6 +760,12 @@ class Ops:
     def do_grade(self, args, prepared, command):
         return grading_engine.Grader(self, self.log).run(args)
 
+    def do_grade_lut(self, args, prepared, command):
+        """grade with a LUT on this computer: the kind NOLGIA's API sends when `lut`, `lut_input` or `folders` is
+        given (0.3.1). Its own kind, so the API sends a LUT grade only to a plugin that has it, and a 0.3.0 plugin
+        refuses it instead of grading without the LUT."""
+        return grading_engine.Grader(self, self.log).run(args)
+
     # ------------------------------------------------------------ save, open
 
     def do_save(self, args, prepared, command):
