@@ -598,6 +598,7 @@ class UserLutsTest(unittest.TestCase):
         cube("NOLGIA Grade/Looks/Print/x.cube")
         cube("Blackmagic Design/Blackmagic 4.6K Film to Video v4.cube", "BMD_TITLE \"4.6K Film to Video\"\n")
         self.mine = cube("My Pack/Film Emulation 5219.cube")
+        self.bad = cube("Pack (2024), v2/Night.cube")
 
     def tearDown(self):
         os.environ.clear()
@@ -624,6 +625,8 @@ class UserLutsTest(unittest.TestCase):
         self.assertEqual(found["Blackmagic 4.6K Film to Video v4"]["input"], "unsupported")
         self.assertEqual(found["Film Emulation 5219"]["group"], self.U.YOURS)
         self.assertNotIn("Linear to Cineon Log", found)
+        self.assertEqual(found["Night"]["input"], "unsupported")  # a DCTL cannot point at a path with ( ) or ,
+        self.assertIn("bracket", found["Night"]["note"])
         self.assertNotIn("x", found)
         extra = tempfile.mkdtemp(prefix="nolgia-extra-")
         try:
@@ -676,6 +679,8 @@ class UserLutsTest(unittest.TestCase):
         self.assertTrue(items[0].nodes[6]["params"][drx.LUT_PATH].endswith("Rec709 Kodak 2383 D65 60%.dctl"))
         with self.assertRaises(CommandError):
             engine.Grader(ops).run(engine.validate_args({"lut": "Blackmagic 4.6K Film to Video v4"}))
+        with self.assertRaises(CommandError):
+            engine.Grader(ops).run(engine.validate_args({"lut": "Night"}))
         with self.assertRaises(CommandError):
             engine.validate_args({"lut": "a", "look": "warm-print"})
         listing = engine.Grader(ops).run(engine.validate_args({"action": "looks"}))

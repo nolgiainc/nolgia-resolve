@@ -146,6 +146,15 @@ def detect_input(name, header):
     return "rec709", "assumed: nothing in the LUT names a log input, so it is taken as a Rec.709 look"
 
 
+UNSAFE = set("(),;\"'")
+
+
+def path_is_safe(path):
+    """Whether a DCTL can point at this file: DaVinci Resolve 21.1.1 stops with an "Error Processing DaVinci CTL"
+    dialog (which holds Resolve until someone clicks OK) on a DEFINE_LUT path with a bracket or comma in it."""
+    return not (set(path) & UNSAFE)
+
+
 def _display_output(header, name):
     low = (header + " " + name).lower()
     if "dci-p3" in low or "p3" in name.lower().split()[0:1]:
@@ -166,6 +175,11 @@ def _entry(path, root, group):
                                                                              _display_output(header, name))}
     if group == INSTALLED and name.lower().startswith("dci-p3"):
         entry["output"] = "dci-p3"
+    if not path_is_safe(path):
+        entry["input"] = "unsupported"
+        entry["note"] = ("its folder or file name has a bracket, comma, semicolon or quote: DaVinci Resolve stops with an "
+                         "error on a DCTL that points at such a path, so move or rename it to use it here")
+        return entry
     if space == "unsupported":
         entry["input"] = "unsupported"
         entry["note"] = ("takes a log NOLGIA cannot convert to yet (an older Blackmagic Film, D-Log M, RED "

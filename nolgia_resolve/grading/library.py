@@ -97,12 +97,15 @@ def install_all_looks(lut_root, space="dwg"):
 
 
 def safe_name(text):
-    return "".join(c if c.isalnum() or c in " ._-()&+,'" else "_" for c in text).strip() or "LUT"
+    return " ".join("".join(c if c.isalnum() or c in " ._-&+" else " " for c in text).split()) or "LUT"
 
 
 def install_user_lut(lut_root, entry, strength=1.0, space=None):
     """The strength DCTL for someone's own LUT (entry from userluts.index); returns the LOOK node's path.
     Writes the 10% steps too, so the dial is in the node's LUT menu; never copies the LUT itself."""
+    from .userluts import path_is_safe
+    if not path_is_safe(entry["path"]):
+        raise ValueError("a DCTL cannot point at %s (a bracket or comma in its path)" % entry["path"])
     space = space or entry["input"]
     folder = "LUTs at strength/%s/%s" % (safe_name(entry["group"]), safe_name(entry["name"]))
     pct = int(round(strength * 100))
