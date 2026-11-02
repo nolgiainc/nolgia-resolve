@@ -11,12 +11,14 @@
   sleep) finishes first.
 """
 
+import contextlib
 import ctypes
 import io
 import linecache
 import math
 import sys
 import threading
+import time
 import traceback
 import uuid
 
@@ -116,6 +118,9 @@ class _Watchdog:
 
     def start(self):
         self.timer.start()
+        # Give the timer's thread a moment to reach its wait, so it runs no
+        # Python while the code does (see mainthread.Quiet).
+        time.sleep(0.005)
 
     def finish(self):
         self.timer.cancel()
@@ -127,8 +132,13 @@ class _Watchdog:
                 _async_raise(self.thread_id, None)
 
 
-def run_python(code, namespace, timeout=None, filename=None):
-    """Execute `code` in `namespace` on the calling thread."""
+def run_python(code, namespace, timeout=None, filename=None, context=None):
+    """Execute `code` in `namespace` on the calling thread.
+
+    `context`, when given, is a function returning a context manager that
+    the code runs inside (Blender: the window and 3D view override). It opens
+    after the timeout's thread is waiting and closes before that thread is
+    told to stop, so that thread never runs Python inside it."""
     filename = filename or "<nolgia run %s>" % uuid.uuid4().hex[:8]
     namespace.setdefault("result", None)
     namespace.setdefault("__name__", "__nolgia__")
@@ -150,7 +160,8 @@ def run_python(code, namespace, timeout=None, filename=None):
             if watchdog:
                 watchdog.start()
             try:
-                exec(compiled, namespace)
+                with (context() if context is not None else contextlib.nullcontext()):
+                    exec(compiled, namespace)
             finally:
                 if watchdog:
                     watchdog.finish()

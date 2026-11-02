@@ -370,6 +370,26 @@ class ChatViewTest(unittest.TestCase):
         self.assertNotIn("ma2", html, "a reply being worked on is not drawn")
         self.assertTrue(html.endswith('<p><a name="end"></a>&nbsp;</p>'))
 
+    def test_background_work_is_one_grey_line_never_its_commands(self):
+        # The panel showed the platform's prompt to the Agent, with the pod's
+        # shell commands in it, under "BACKGROUND WORK FINISHED" (Blender,
+        # 2026-11-01). core/chat.py now hands the view only the notice.
+        raw = "[IMPORTANT: Background process proc_2a73 exited.\nCommand: cd /opt/data/cache/scratch && source mc.sh]"
+        owner = type("Owner", (), {"bump": lambda self: None, "log": lambda self, text: None,
+                                   "auth_failed": lambda self, text: None})()
+        chat = core_chat.AgentChat(owner, threaded=False)
+        with chat._lock:
+            chat.session_id = "s-1"
+            chat.loaded = True
+            chat._merge([{"id": "u-1", "role": "user", "status": "complete", "origin": "background",
+                          "content": raw, "session_id": "s-1", "created_at": "2026-11-01T23:02:35Z"}])
+        view = chat.view()
+        self.assertEqual(view["rows"][0]["text"], core_chat.BACKGROUND_NOTICE)
+        html = chatview.thread_html(view)
+        self.assertIn(core_chat.BACKGROUND_NOTICE, html)
+        for leak in ("mc.sh", "/opt/data", "IMPORTANT", "YOU"):
+            self.assertNotIn(leak, html)
+
     def test_the_button_hint_only_when_there_are_buttons(self):
         hint = "Answer with a button below"
         open_question = {"text": "Switch to vertical?", "options": []}

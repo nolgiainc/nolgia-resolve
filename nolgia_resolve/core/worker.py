@@ -21,6 +21,7 @@ import traceback
 from . import APP, DEVICE_CLIENT_ID, PLUGIN_VERSION
 from .api import ApiError, NetworkError, Unauthorized
 from .commands import CAPABILITIES, Command, CommandError, result_body, validate
+from .mainthread import NoQuiet
 from .util import Backoff, computer_name, os_name, remember_computer_name
 
 
@@ -39,6 +40,14 @@ from .util import Backoff, computer_name, os_name, remember_computer_name
 #   are slowed (macOS App Nap slows the timers of an app it does not show),
 #   so the session stays live while polls keep coming back.
 NETWORK_RETRY_MAX = 10.0
+
+# While the main thread holds `quiet` (mainthread.Quiet: it runs an operator
+# inside a context override), the heartbeat waits, but at most this long, so
+# the session stays live (NOLGIA counts it live for 60 s after a check in)
+# even through a long piece of code.
+QUIET_HEARTBEAT_LIMIT = 30.0
+
+_STOP = object()
 
 # The API's limits on POST /bridge/sessions fields (characters).
 MAX_VERSION = 64
@@ -68,7 +77,8 @@ class Status:
 class BridgeWorker:
     def __init__(self, api, executor, activity, instance_id, snapshot,
                  prepare=None, finish=None, on_status=None, on_auth_failed=None,
-                 log=None, heartbeat_interval=20.0, machine_name=None, network_retry_max=NETWORK_RETRY_MAX):
+                 log=None, heartbeat_interval=20.0, machine_name=None, network_retry_max=NETWORK_RETRY_MAX,
+                 quiet=None):
         self.api = api
         self.executor = executor
         self.activity = activity
@@ -81,6 +91,7 @@ class BridgeWorker:
         self.log = log or (lambda message: None)
         self.heartbeat_interval = heartbeat_interval
         self.network_retry_max = network_retry_max
+        self.quiet = quiet or NoQuiet()
         self.last_heartbeat_at = 0.0  # time.monotonic() of the last heartbeat NOLGIA took
         # A name looked up here is kept for NOLGIA for Photoshop (start()).
         self._remember_name = machine_name is None
@@ -102,6 +113,7 @@ class BridgeWorker:
         self._session_ready = threading.Event()
         self.finished = threading.Event()
         self._in_flight = None
+        self._ticket = None
         self._deleted = False
         self._auth_dead = False
         self._threads = []
@@ -129,6 +141,10 @@ class BridgeWorker:
         """Stop at once, e.g. when Blender quits. No more retries."""
         self.stop()
         self._kill.set()
+        with self._lock:
+            ticket = self._ticket
+        if ticket is not None:
+            ticket.resolve(False, None, "DaVinci Resolve closed before this command finished.")
 
     def request_heartbeat(self):
         self._wake.set()
@@ -224,53 +240,67 @@ class BridgeWorker:
         streak = {"first": True}
         try:
             while not self._stop.is_set():
-                try:
-                    data = self.api.register_session(self.payload())
-                except Unauthorized as err:
-                    self._auth_failed(err)
+                # The request and what follows it run only while the main
+                # thread allows it; the waits between run outside.
+                with self.quiet.work(limit=QUIET_HEARTBEAT_LIMIT):
+                    wait = _STOP if self._stop.is_set() else self._heartbeat(backoff, streak)
+                if wait is _STOP:
                     break
-                except (ApiError, NetworkError) as err:
-                    if self._send_os and isinstance(err, ApiError) and err.status == 400 and '"os"' in err.detail:
-                        self._send_os = False
-                        continue
-                    delay = self._retry_delay(err, backoff, streak)
-                    if delay is None:
-                        self.log("The connection to NOLGIA broke (%s); trying again at once." % err)
-                        continue
-                    self._set_status(Status.RETRYING, self._retry_text(err, delay))
-                    self.log(self.status_text)
-                    self._wake.clear()
-                    self._wake.wait(delay)  # stop, or a poll that gets through, ends it early
-                    continue
-                # The API answers the session itself; accept {"session": {...}} too.
-                session = data if data.get("id") else data.get("session")
-                session_id = session.get("id") if isinstance(session, dict) else None
-                if not session_id:
-                    delay = backoff.next()
-                    self._set_status(Status.RETRYING, "NOLGIA answered without a session. Trying again in %d s." % round(delay))
-                    self._wait(delay)
-                    continue
-                backoff.reset()
-                streak["first"] = True
-                self.last_heartbeat_at = time.monotonic()
-                wait = data.get("poll_wait_seconds") or session.get("poll_wait_seconds") or 25
-                try:
-                    wait = max(1, min(25, int(wait)))
-                except (TypeError, ValueError):
-                    wait = 25
-                first = self.session_id != session_id
-                with self._lock:
-                    self.session_id = session_id
-                    self.poll_wait = wait
-                self._session_ready.set()
-                if first or self.state != Status.CONNECTED:
-                    self._set_status(Status.CONNECTED, "Connected. NOLGIA can work in this DaVinci Resolve.")
-                    self.log("Connected to NOLGIA (session %s)." % session_id)
-                self._wake.wait(self.heartbeat_interval)
-                self._wake.clear()
+                if wait is not None:
+                    wait()
         finally:
             self._heartbeat_done.set()
             self._close_if_idle()
+
+    def _heartbeat(self, backoff, streak):
+        """One heartbeat. Returns _STOP, None (send again at once) or what to
+        wait on before the next one."""
+        try:
+            data = self.api.register_session(self.payload())
+        except Unauthorized as err:
+            self._auth_failed(err)
+            return _STOP
+        except (ApiError, NetworkError) as err:
+            if self._send_os and isinstance(err, ApiError) and err.status == 400 and '"os"' in err.detail:
+                self._send_os = False
+                return None
+            delay = self._retry_delay(err, backoff, streak)
+            if delay is None:
+                self.log("The connection to NOLGIA broke (%s); trying again at once." % err)
+                return None
+            self._set_status(Status.RETRYING, self._retry_text(err, delay))
+            self.log(self.status_text)
+            self._wake.clear()
+            return lambda: self._wake.wait(delay)  # stop, or a poll that gets through, ends it early
+        # The API answers the session itself; accept {"session": {...}} too.
+        session = data if data.get("id") else data.get("session")
+        session_id = session.get("id") if isinstance(session, dict) else None
+        if not session_id:
+            delay = backoff.next()
+            self._set_status(Status.RETRYING, "NOLGIA answered without a session. Trying again in %d s." % round(delay))
+            return lambda: self._wait(delay)
+        backoff.reset()
+        streak["first"] = True
+        self.last_heartbeat_at = time.monotonic()
+        wait = data.get("poll_wait_seconds") or session.get("poll_wait_seconds") or 25
+        try:
+            wait = max(1, min(25, int(wait)))
+        except (TypeError, ValueError):
+            wait = 25
+        first = self.session_id != session_id
+        with self._lock:
+            self.session_id = session_id
+            self.poll_wait = wait
+        self._session_ready.set()
+        if first or self.state != Status.CONNECTED:
+            self._set_status(Status.CONNECTED, "Connected. NOLGIA can work in this DaVinci Resolve.")
+            self.log("Connected to NOLGIA (session %s)." % session_id)
+
+        def idle():
+            self._wake.wait(self.heartbeat_interval)
+            self._wake.clear()
+
+        return idle
 
     def _session_lost(self, session_id):
         with self._lock:
@@ -345,9 +375,16 @@ class BridgeWorker:
             command.args = validate(command.kind, command.args)
             prepared = self.prepare(command) if self.prepare else None
             ticket = self.executor.submit(command, prepared)
-            while not ticket.wait(0.5):
-                if self._kill.is_set():
-                    return False, None, "DaVinci Resolve closed before this command finished."
+            with self._lock:
+                self._ticket = ticket
+            if self._kill.is_set():
+                ticket.resolve(False, None, "DaVinci Resolve closed before this command finished.")
+            # One wait with no timeout: a thread that woke every so often to
+            # look would run Python while DaVinci Resolve runs the command (see
+            # mainthread.Quiet). kill() answers the ticket instead.
+            ticket.wait()
+            with self._lock:
+                self._ticket = None
             if ticket.ok and self.finish:
                 return True, self.finish(command, ticket.result), None
             return bool(ticket.ok), ticket.result, ticket.error
