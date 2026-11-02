@@ -376,7 +376,8 @@ __DEVICE__ float lut_decode(float y)
 
 LUT_GAMUT = {"cineon": "rec709", "slog3": "sgamut3cine", "logc3": "awg3", "logc4": "awg4", "vlog": "vgamut",
              "clog2": "cinemagamut", "clog3": "cinemagamut", "bmdfilm5": "bmdwg5", "applelog": "rec2020",
-             "acescct": "ap1", "flog": "rec2020", "flog2": "rec2020", "dlog": "dgamut", "nlog": "rec2020"}
+             "acescct": "ap1", "flog": "rec2020", "flog2": "rec2020", "flog2c": "fgamutc", "dlog": "dgamut",
+             "nlog": "rec2020"}
 
 
 def lut_at_strength(lut_path, space, strength, name):
@@ -424,7 +425,7 @@ def lut_at_strength(lut_path, space, strength, name):
                   + "    float3 c = APPLY_LUT(_fminf(1.0f, _powf(tone(vr), 1.0f / 2.4f)), _fminf(1.0f, _powf(tone(vg), 1.0f / 2.4f)),\n"
                   + "                         _fminf(1.0f, _powf(tone(vb), 1.0f / 2.4f)), lut);\n")
         else:
-            parts.append(ENCODERS[space])
+            parts.append(ENCODERS["flog2" if space == "flog2c" else space])
             m = C.gamut_matrix("dwg", LUT_GAMUT[space])
             compress = ""
             if space == "cineon":

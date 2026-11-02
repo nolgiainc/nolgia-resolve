@@ -608,7 +608,8 @@ class UserLutsTest(unittest.TestCase):
         d = self.U.detect_input
         self.assertEqual(d("XH2S_FLog2_to_ETERNA_33grid", "")[0], "flog2")
         self.assertEqual(d("FLog_FGamut_to_PROVIA", "")[0], "flog")
-        self.assertEqual(d("GFX100II_FLog2C_to_ETERNA", "")[0], "unsupported")
+        self.assertEqual(d("GFX100II_FLog2C_to_ETERNA", "")[0], "flog2c")
+        self.assertEqual(d("Mavic3_DLogM_to_Rec709", "")[0], "unsupported")
         self.assertEqual(d("LogC4_to_Rec709", "")[0], "logc4")
         self.assertEqual(d("x", "#   Input: Cineon Log\n")[0], "cineon")
         self.assertEqual(d("Teal Summer", "")[0], "rec709")

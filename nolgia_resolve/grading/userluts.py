@@ -24,7 +24,7 @@ SHIPPED = ("Film Looks", "Arri", "Astrodesign", "Blackmagic Design", "Canon", "D
 SKIP = ("NOLGIA", "NOLGIA Grade", "VFX IO", "HDR ST 2084", "HDR Hybrid Log-Gamma", "ACES", "DCI",
         "ACES Transforms")
 INPUTS = ("auto", "cineon", "rec709", "dwg", "acescct", "slog3", "logc3", "logc4", "vlog", "clog2", "clog3",
-          "bmdfilm5", "applelog", "flog", "flog2", "dlog", "nlog")
+          "bmdfilm5", "applelog", "flog", "flog2", "flog2c", "dlog", "nlog")
 INSTALLED = "Installed with DaVinci Resolve"
 YOURS = "Your LUTs"
 MAX_FILES = 3000
@@ -32,7 +32,35 @@ HEADER_BYTES = 2048
 
 # Camera makers' own free LUTs a person can download themselves: NOLGIA only links to the maker's page.
 # Filled from each maker's own page and terms (research/OFFICIAL-LUTS.md).
-OFFICIAL = []
+OFFICIAL = [
+    {"maker": "Fujifilm", "name": "Fujifilm film simulation LUTs (X and GFX)",
+     "what": "Fujifilm's own F-Log, F-Log2 and F-Log2 C LUTs to its film simulations (ETERNA, PROVIA, Velvia, "
+             "CLASSIC CHROME, REALA ACE, ACROS and more), one download per camera.",
+     "url": "https://www.fujifilm-x.com/global/support/download/lut/"},
+    {"maker": "ARRI", "name": "ARRI Look Library",
+     "what": "ARRI's 87 looks as .cube files for LogC4 and LogC3, offered free for postproduction.",
+     "url": "https://www.arri.com/look-library"},
+    {"maker": "ARRI", "name": "ARRI LogC4 and LogC3 LUT packages",
+     "what": "ARRI's official conversions from LogC to Rec.709 and other outputs.",
+     "url": "https://www.arri.com/log-c"},
+    {"maker": "Panasonic", "name": "Panasonic VariCam LUT Library",
+     "what": "Panasonic's V-Log conversions and creative looks (the E-E.CUBE set is for grading).",
+     "url": "https://pro-av.panasonic.net/en/cinema_camera_varicam_eva/support/lut/"},
+    {"maker": "Panasonic", "name": "Panasonic LUMIX V-Log to V-709",
+     "what": "Panasonic's V-Log to V-709 LUT for LUMIX cameras.",
+     "url": "https://av.jpn.support.panasonic.com/support/global/cs/dsc/download/lut/index.html"},
+    {"maker": "RED", "name": "RED IPP2 output presets",
+     "what": "RED's own output LUTs, which RED says can be used in third party software.",
+     "url": "https://www.red.com/download/ipp2-output-presets"},
+    {"maker": "RED", "name": "RED Creative LUT Kit",
+     "what": "RED's creative looks (needs a free RED account on RED's site).",
+     "url": "https://www.red.com/download/red-creative-lut-kit"},
+    {"maker": "Nikon", "name": "Nikon N-Log LUT",
+     "what": "Nikon's N-Log to Rec.709 LUT and four creative looks.",
+     "url": "https://downloadcenter.nikonimglib.com/en/download/sw/258.html"},
+]
+OFFICIAL_NOTE = ("Each opens the maker's own download page in your browser, under the maker's own terms. NOLGIA does not "
+                 "copy, change or ship these LUTs and is not affiliated with or endorsed by their makers.")
 
 
 def _settings_path():
@@ -82,8 +110,9 @@ KEYS = (
     ("clog2", (r"c-?log\s?2", r"canon\s?log\s?2", r"canonlog2")),
     ("bmdfilm5", (r"gen\s?5 film", r"film gen\s?5", r"gen5", r"generation 5")),
     ("applelog", (r"apple\s?log",)),
-    ("flog2", (r"f-?log\s?2(?!\s?c)", r"flog2(?!c)")),
-    ("unsupported", (r"f-?log\s?2\s?c", r"flog2c", r"d-?log\s?m", r"dlogm", r"log3g10", r"redlog", r"\bhlg\b",
+    ("flog2c", (r"f-?log\s?2\s?c", r"flog2c")),
+    ("flog2", (r"f-?log\s?2", r"flog2")),
+    ("unsupported", (r"d-?log\s?m", r"dlogm", r"log3g10", r"redlog", r"\bhlg\b",
                      r"\bpq\b", r"st\s?2084", r"blackmagic .*film", r"\bbmd .*film", r"\bfilm to (video|rec|extended)")),
     ("flog", (r"f-?log",)),
     ("dlog", (r"d-?log",)),
@@ -139,7 +168,7 @@ def _entry(path, root, group):
         entry["output"] = "dci-p3"
     if space == "unsupported":
         entry["input"] = "unsupported"
-        entry["note"] = ("takes a log NOLGIA cannot convert to yet (an older Blackmagic Film, F-Log2 C, D-Log M, RED "
+        entry["note"] = ("takes a log NOLGIA cannot convert to yet (an older Blackmagic Film, D-Log M, RED "
                          "Log3G10 or an HDR signal); give `lut_input` if you know it is one NOLGIA has")
     if entry["output"] == "dci-p3":
         entry["note"] = "made for a DCI-P3 display; NOLGIA's grade ends in Rec.709, so use the Rec709 version"

@@ -99,7 +99,7 @@ def validate_args(args):
                "canonlog2": "clog2", "clog3": "clog3", "canonlog3": "clog3", "bmdfilm5": "bmdfilm5",
                "bmdfilm": "bmdfilm5", "blackmagicfilm": "bmdfilm5", "applelog": "applelog", "rec709": "rec709",
                "rec.709": "rec709", "auto": "auto", "flog": "flog", "fujiflog": "flog", "flog2": "flog2",
-               "dlog": "dlog", "djidlog": "dlog", "nlog": "nlog", "nikonnlog": "nlog"}
+               "dlog": "dlog", "djidlog": "dlog", "nlog": "nlog", "nikonnlog": "nlog", "flog2c": "flog2c"}
     if camera not in aliases:
         raise CommandError("`camera` is auto or one of: %s." % ", ".join(CAMERA_CHOICES))
     out["camera"] = aliases[camera]
@@ -208,6 +208,7 @@ KEYWORDS = (
     ("clog2", ("c-log2", "clog2", "canon log 2", "c-log 2", "canonlog2")),
     ("bmdfilm5", ("blackmagic design film", "film gen 5", "bmdfilm", "bmd film", "blackmagic film")),
     ("applelog", ("apple log", "applelog")),
+    ("flog2c", ("f-log2 c", "flog2c", "f-log2c", "f-gamut c")),
     ("flog2", ("f-log2", "flog2", "f-log 2")),
     ("flog", ("f-log", "flog")),
     ("dlog", ("d-log", "dlog")),
@@ -419,6 +420,7 @@ class Grader(object):
                         "computer and never copies it. A LUT's input is read from it (Resolve's Film Looks take "
                         "Cineon log); set `lut_input` when it is wrong.",
             "official_free_luts": userluts.OFFICIAL,
+            "official_note": userluts.OFFICIAL_NOTE,
         }
 
     def ops_lut_dirs(self):

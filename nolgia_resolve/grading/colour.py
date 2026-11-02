@@ -262,6 +262,9 @@ def nlog_decode(y):
     return math.exp((y - NL["d"]) / NL["c"])
 
 GAMUTS["dgamut"] = ([(0.71, 0.31), (0.21, 0.88), (0.09, -0.08)], D65)
+# F-Gamut C, as DaVinci Resolve 21.1.1's own "Fujifilm F-Log2 C" input transform has it (fitted on a 144 patch
+# chart, 0.3% residual), so a Fujifilm F-Log2 C LUT gets the picture Resolve would give it.
+GAMUTS["fgamutc"] = ([(0.7347, 0.2653), (0.0254, 0.9741), (0.1172, -0.0225)], D65)
 
 # camera id -> (label, curve name, gamut)
 CAMERAS = {
@@ -275,6 +278,7 @@ CAMERAS = {
     "applelog": ("Apple Log / Rec.2020", "applelog", "rec2020"),
     "flog": ("Fujifilm F-Log / F-Gamut", "flog", "rec2020"),
     "flog2": ("Fujifilm F-Log2 / F-Gamut", "flog2", "rec2020"),
+    "flog2c": ("Fujifilm F-Log2 C / F-Gamut C", "flog2", "fgamutc"),
     "dlog": ("DJI D-Log / D-Gamut", "dlog", "dgamut"),
     "nlog": ("Nikon N-Log / N-Gamut", "nlog", "rec2020"),
 }

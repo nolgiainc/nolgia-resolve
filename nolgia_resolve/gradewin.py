@@ -162,7 +162,7 @@ class GradeWindow(object):
             row = tree.NewItem()
             row.Text[0] = "Free from the maker"
             row.Text[1] = item["name"]
-            row.Text[2] = "%s Open download page, save it, then add its folder." % item["what"]
+            row.Text[2] = "%s Opens %s's own page. NOLGIA is not affiliated with %s." % (item["what"], item["maker"], item["maker"])
             row.ToolTip[2] = item["url"]
             tree.AddTopLevelItem(row)
             self.rows.append(("official", item))
