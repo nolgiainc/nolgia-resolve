@@ -27,7 +27,14 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
    the scene's main light, from its still.
 3. The look and its strength. Offer two or three from the library by name,
    with one line each from its description (`grade` with `action: "looks"`);
-   default strength 100%, or what the person said ("60%").
+   default strength 100%, or what the person said ("60%"). When they name a
+   LUT they have (Resolve's own Kodak 2383 or Fujifilm 3513DI Film Looks, a
+   camera maker's LUT, their own show LUT), use it instead: give `lut` with
+   its id, name or path from `installed_with_resolve` or `your_luts` (NOLGIA
+   for DaVinci Resolve 0.3.1 and newer), and `folders` when it lives in a
+   folder NOLGIA does not list yet. A maker's free LUT they do not have yet:
+   give its page from `official_free_luts`; NOLGIA never downloads or ships
+   it.
 4. Only if `inspect` cannot tell: which camera log the clips are in.
 
 ## Build
@@ -48,7 +55,10 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
 
 - Another look or strength: `grade` with `action: "look"` (only the LOOK node
   changes; their own changes to the other nodes stay). `look: "none"` switches
-  it off.
+  it off. A LUT on their computer works the same way with `lut`; when the
+  picture comes out wrong (washed out or crushed), the LUT expects another
+  input: send it again with `lut_input` (`cineon`, `rec709`, or the camera
+  log).
 - By hand: the strength steps are in the LOOK node's LUT menu (NOLGIA Grade >
   Looks > the family), BALANCE and EXPOSURE are the Offset wheel, CONTRAST and
   SAT the Primaries.

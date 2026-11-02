@@ -34,6 +34,7 @@ from . import drx
 from . import library
 from . import looks as L
 from . import measure as M
+from . import userluts
 
 ACTIONS = ("looks", "inspect", "apply", "look")
 CLIP_SCOPES = ("all", "selected", "current")
@@ -97,7 +98,8 @@ def validate_args(args):
     aliases = {"slog3": "slog3", "logc3": "logc3", "logc": "logc3", "logc4": "logc4", "vlog": "vlog", "clog2": "clog2",
                "canonlog2": "clog2", "clog3": "clog3", "canonlog3": "clog3", "bmdfilm5": "bmdfilm5",
                "bmdfilm": "bmdfilm5", "blackmagicfilm": "bmdfilm5", "applelog": "applelog", "rec709": "rec709",
-               "rec.709": "rec709", "auto": "auto"}
+               "rec.709": "rec709", "auto": "auto", "flog": "flog", "fujiflog": "flog", "flog2": "flog2",
+               "dlog": "dlog", "djidlog": "dlog", "nlog": "nlog", "nikonnlog": "nlog", "flog2c": "flog2c"}
     if camera not in aliases:
         raise CommandError("`camera` is auto or one of: %s." % ", ".join(CAMERA_CHOICES))
     out["camera"] = aliases[camera]
@@ -125,6 +127,18 @@ def validate_args(args):
             out["look"] = found.slug
     else:
         out["look"] = None
+    lut = args.get("lut")
+    out["lut"] = str(lut).strip() if lut not in (None, "") else None
+    if out["lut"] and out["look"] not in (None, "none"):
+        raise CommandError("Give `look` (NOLGIA's library) or `lut` (a LUT on this computer), not both.")
+    lut_input = str(args.get("lut_input") or "auto").strip().lower()
+    if lut_input not in userluts.INPUTS:
+        raise CommandError("`lut_input` is one of: %s." % ", ".join(userluts.INPUTS))
+    out["lut_input"] = lut_input
+    folders = args.get("folders") or []
+    if not isinstance(folders, list) or not all(isinstance(f, str) and f.strip() for f in folders) or len(folders) > 20:
+        raise CommandError("`folders` is a list of up to 20 folders on this computer to look for LUTs in.")
+    out["folders"] = [f.strip() for f in folders]
     strength = args.get("strength")
     if strength is not None:
         strength = _number(args, "strength", 0, 100)
@@ -137,8 +151,8 @@ def validate_args(args):
     out["neutral_hero"] = bool(args.get("neutral_hero", False))
     frames = _number(args, "frames", 1, 5, 3)
     out["frames"] = int(frames)
-    if action == "look" and out["look"] is None:
-        raise CommandError("action \"look\" needs `look` (a look from the library, or \"none\").")
+    if action == "look" and out["look"] is None and not out["lut"]:
+        raise CommandError("action \"look\" needs `look` (a look from the library, or \"none\") or `lut`.")
     return out
 
 
@@ -167,6 +181,9 @@ def describe(args, caller="NOLGIA Agent"):
     if args["look"] and args["look"] != "none":
         look = L.BY_SLUG[args["look"]]
         lines.append("Look: %s at %d%% (NOLGIA's own film look library)." % (look.name, round(args["strength"] * 100)))
+    elif args.get("lut"):
+        lines.append("Look: the LUT %s on this computer at %d%% (NOLGIA points at your file and never copies it)."
+                     % (args["lut"], round(args["strength"] * 100)))
     elif args["look"] == "none":
         lines.append("Look: none (the LOOK node is switched off).")
     lines.append("Every step lands as labelled nodes you can adjust. Each clip gets a new color version, "
@@ -191,6 +208,11 @@ KEYWORDS = (
     ("clog2", ("c-log2", "clog2", "canon log 2", "c-log 2", "canonlog2")),
     ("bmdfilm5", ("blackmagic design film", "film gen 5", "bmdfilm", "bmd film", "blackmagic film")),
     ("applelog", ("apple log", "applelog")),
+    ("flog2c", ("f-log2 c", "flog2c", "f-log2c", "f-gamut c")),
+    ("flog2", ("f-log2", "flog2", "f-log 2")),
+    ("flog", ("f-log", "flog")),
+    ("dlog", ("d-log", "dlog")),
+    ("nlog", ("n-log", "nlog")),
     ("rec709", ("rec709", "rec.709", "bt.709", "bt709")),
 )
 
@@ -373,7 +395,8 @@ class Grader(object):
 
     # .......................................................... actions
 
-    def looks(self):
+    def looks(self, args=None):
+        luts = self.user_luts(args or {})
         resolve_own = []
         for base in self.ops_lut_dirs():
             folder = os.path.join(base, "Film Looks")
@@ -390,6 +413,14 @@ class Grader(object):
                                    "computer. They expect Cineon log in and ship with Resolve; NOLGIA only points a "
                                    "node at them, never copies them."},
             "cameras": {k: v[0] for k, v in C.CAMERAS.items()},
+            "installed_with_resolve": [_lut_brief(e) for e in luts if e["group"] == userluts.INSTALLED][:300],
+            "your_luts": [_lut_brief(e) for e in luts if e["group"] == userluts.YOURS][:300],
+            "your_lut_count": sum(1 for e in luts if e["group"] == userluts.YOURS),
+            "lut_note": "Give one as `lut` (its id, name or path) with `strength`; NOLGIA points at the file on this "
+                        "computer and never copies it. A LUT's input is read from it (Resolve's Film Looks take "
+                        "Cineon log); set `lut_input` when it is wrong.",
+            "official_free_luts": userluts.OFFICIAL,
+            "official_note": userluts.OFFICIAL_NOTE,
         }
 
     def ops_lut_dirs(self):
@@ -411,7 +442,7 @@ class Grader(object):
 
     def run(self, args):
         if args["action"] == "looks":
-            return self.looks()
+            return self.looks(args)
         if args["action"] == "inspect":
             return self.inspect(args)
         page = call(self.resolve, "GetCurrentPage")
@@ -425,7 +456,36 @@ class Grader(object):
             if page and page != "color":
                 call(self.resolve, "OpenPage", page)
 
+    def user_luts(self, args):
+        return userluts.index(folders=userluts.extra_folders() + args.get("folders", []))
+
+    def lut_entry(self, args):
+        entry = userluts.find(args["lut"], self.user_luts(args))
+        if entry is None:
+            raise CommandError("There is no LUT %r on this computer that NOLGIA can see. Ask with action \"looks\" for "
+                               "the list, give its full path, or add its folder with `folders`." % args["lut"])
+        return entry
+
     def look_path(self, root, args, science):
+        if args.get("lut"):
+            entry = self.lut_entry(args)
+            if not userluts.path_is_safe(entry["path"]):
+                raise CommandError("%s: its folder or file name has a bracket, comma, semicolon or quote, and DaVinci "
+                                   "Resolve stops with an error on a DCTL that points at such a path. Move or rename it, "
+                                   "then try again." % entry["path"])
+            space = entry["input"] if args.get("lut_input", "auto") == "auto" else args["lut_input"]
+            if space == "unsupported":
+                raise CommandError("%s %s." % (entry["name"], entry.get("note", "takes a log NOLGIA cannot convert to yet")))
+            if science == "aces" and space != "acescct":
+                raise CommandError("In an ACES project the LOOK node works in ACEScct: only a LUT made for ACEScct "
+                                   "(lut_input \"acescct\") goes on it. %s takes %s." % (entry["name"], space))
+            if science == "aces" or (science == "rcm" and space == "dwg"):
+                space = "dwg"  # the node's own working space: the LUT goes on as it is
+            elif science == "rcm":
+                raise CommandError("In a colour managed project NOLGIA puts only working space LUTs on LOOK; %s "
+                                   "takes %s. Use a project that is not colour managed (DaVinci YRGB)." % (entry["name"], space))
+            self.lut_used = dict(entry, input=space)
+            return library.install_user_lut(root, entry, args["strength"], space)
         if not args["look"] or args["look"] == "none":
             return None
         space = "acescct" if science == "aces" else "dwg"
@@ -454,7 +514,8 @@ class Grader(object):
             (done if ok else skipped).append({"clip": n, "name": call(item, "GetName"), "node": node} if ok else
                                              {"clip": n, "name": call(item, "GetName"), "why": "SetLUT returned false"})
         self.ops.changed = True
-        return {"look": args["look"], "strength": args["strength"], "lut": path, "changed": done, "skipped": skipped}
+        return {"look": args["look"], "user_lut": _lut_brief(self.lut_used) if getattr(self, "lut_used", None) else None,
+                "strength": args["strength"], "lut": path, "changed": done, "skipped": skipped}
 
     def apply(self, args):
         started = time.time()
@@ -535,7 +596,8 @@ class Grader(object):
         self.ops.changed = True
         out = {"project": call(project, "GetName"), "timeline": call(tl, "GetName"), "color_science": mode,
                "clips": [results[n] for n, _ in clips], "hero": args["match"], "seconds": round(time.time() - started, 1),
-               "look": args["look"], "strength": args["strength"] if args["look"] not in (None, "none") else None,
+               "look": args["look"], "strength": args["strength"] if (args["look"] not in (None, "none") or args.get("lut")) else None,
+               "lut": _lut_brief(self.lut_used) if getattr(self, "lut_used", None) else None,
                "lut_folder": os.path.join(root, library.SUBFOLDER), "cost": "free: it ran in DaVinci Resolve"}
         if science == "rcm":
             space = str(call(project, "GetSetting", "colorSpaceTimeline", default="") or "")
@@ -674,3 +736,10 @@ class Grader(object):
                 results[n]["balance_stops"] = [round(b, 3) for b in bal]
                 results[n]["exposure_stops"] = round(exp, 3)
                 results[n]["second_pass"] = True
+
+
+def _lut_brief(entry):
+    out = {k: entry.get(k) for k in ("id", "name", "group", "folder", "input", "output", "path")}
+    if entry.get("note"):
+        out["note"] = entry["note"]
+    return out

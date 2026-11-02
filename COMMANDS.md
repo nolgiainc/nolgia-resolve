@@ -197,18 +197,23 @@ null`); `open` works from that state.
 
 Colour grading done by the plugin itself, in this Resolve (0.3.0 and newer):
 colour management from the camera's log, white balance and exposure measured
-from each clip, shot matching to a hero clip, and a look from NOLGIA's own film
-look library at a strength. It costs no NOLGIA credits.
+from each clip, shot matching to a hero clip, and a look at a strength: from
+NOLGIA's own film look library, or (0.3.1 and newer) a LUT already on this
+computer, such as DaVinci Resolve's own Film Looks or the person's own LUTs. It
+costs no NOLGIA credits.
 
 | Argument | |
 |---|---|
 | `action` | `apply` (default), `look`, `looks` or `inspect` |
 | `clips` | `all` (default), `selected`, `current`, or clip numbers `[1, 3]` (1 is the first clip in timeline order, as the Color page numbers them) |
-| `camera` | `auto` (default: the clip's metadata, a Sony sidecar XML or the file name) or `slog3`, `logc3`, `logc4`, `vlog`, `clog2`, `clog3`, `bmdfilm5`, `applelog`, `rec709` |
+| `camera` | `auto` (default: the clip's metadata, a Sony sidecar XML or the file name) or `slog3`, `logc3`, `logc4`, `vlog`, `clog2`, `clog3`, `bmdfilm5`, `applelog`, `flog`, `flog2`, `flog2c`, `dlog`, `nlog` (0.3.1), `rec709` |
 | `correct` | `apply`: measure and set white balance and exposure (default true) |
 | `match` | the hero clip's number: the others' colour and level are matched to it; the hero keeps its own white unless `neutral_hero` |
 | `exposure` | `auto` (default: `match` with a hero, else `even`), `match`, `even` (halfway to the clips' median, at most a stop) or `keep` |
 | `look` | a look's slug or name from the library, or `none` |
+| `lut` | instead of `look` (0.3.1): a LUT on this computer, by the id, name or full path `looks` lists (`installed_with_resolve`, `your_luts`) |
+| `lut_input` | what that LUT takes in: `auto` (default: read from its header, title or file name; Resolve's Film Looks take Cineon), or `cineon`, `rec709`, `dwg`, `acescct`, or a camera log above |
+| `folders` | more folders of the person's LUTs to look in, up to 20 (0.3.1); the Grade window's **Add folder** remembers them |
 | `strength` | 0 to 1, or a percent (60 is 60%); default 1 |
 | `contrast`, `saturation` | Primaries Contrast (pivot at DaVinci Intermediate mid grey, 0.336) and Saturation; 1 is none |
 | `skin` | the skin line node (default true) |
@@ -251,13 +256,37 @@ note?, warning?}`. When `camera` is `auto` and a clip says nothing about its
 log, it fails with `result: {needs_camera: [...], choices: [...]}`: ask the
 person.
 
-**`look`.** Sets another look (or strength) on the LOOK node of clips NOLGIA
-graded, found by its label, leaving every other node as it is; `none` switches
-the node off. Result: `{look, strength, lut, changed, skipped}`.
+**`look`.** Sets another look or LUT (or strength) on the LOOK node of clips
+NOLGIA graded, found by its label, leaving every other node as it is; `none`
+switches the node off. Result: `{look, user_lut, strength, lut, changed,
+skipped}`.
 
-**`looks`.** The library (`slug`, `name`, `family`, `description`), the
-cameras, and the names of Resolve's own Film Looks LUTs on this computer
-(Resolve ships them; NOLGIA only points a node at them, never copies them).
+**A LUT on this computer (`lut`, 0.3.1).** The command kind `grade_lut` is
+`grade` with the same arguments; NOLGIA's API sends `grade_lut` when `lut`,
+`lut_input` or `folders` is given, so a 0.3.0 plugin (which does not have the
+kind) refuses it instead of grading without the LUT. NOLGIA never copies, ships or
+changes the file: it writes a small DCTL in `NOLGIA Grade/LUTs at strength`
+that points at the file (`DEFINE_LUT` with its full path), takes the clip from
+DaVinci Wide Gamut / Intermediate to what the LUT takes in (Cineon for
+Resolve's Film Looks, a camera log, Rec.709 through CST OUT, or the working
+space as it is), applies it, brings a display-referred result back through
+CST OUT's exact inverse, and mixes it at `strength`. Checked in Resolve 21.1.1
+on its own Rec709 Kodak 2383 D65 and Fujifilm 3513DI D65 at 100% and 50%: a
+144-patch chart matches a Python reading of the same file to 0.0015 (one
+saturated patch 0.009). It refuses, by name: a file whose path has a bracket,
+comma, semicolon or quote (Resolve stops on such a DCTL with an error dialog
+that holds it until someone clicks OK); a LUT for a log NOLGIA has no transform
+for (D-Log M, Log3G10, L-Log, OM-Log, HLG, PQ, the older Blackmagic Film); in a
+colour managed project, a LUT that is not for the working space; in ACES, one
+not for ACEScct. DCI-P3 versions of the Film Looks are not listed.
+
+**`looks`.** The library (`slug`, `name`, `family`, `description`,
+`emulates`) with `names_note` (the stock and camera names line), the cameras;
+`installed_with_resolve` (the LUTs that come with Resolve, under Resolve's own
+names) and `your_luts` (the person's own: any other LUT in Resolve's LUT
+folders and in `folders`), each `{id, name, group, folder, input, output,
+path}`; and `official_free_luts`: the makers' own free LUT pages (Fujifilm,
+ARRI, Panasonic, RED, Nikon), links only, with `official_note`.
 
 **`inspect`.** Per clip: the camera log found and how, the current color
 version and its nodes (label, LUT, tools); and the project's colour science.
@@ -265,4 +294,5 @@ version and its nodes (label, LUT, tools); and the project's colour science.
 The files live in `NOLGIA Grade` in Resolve's LUT folder (`CST IN`, `CST OUT`,
 `Corrections`, `Looks/<family>`, `Looks ACEScct/<family>`), written by the
 plugin when first needed: each look as a 33 point `.cube` and its strengths as
-small `.dctl` files at 10% steps.
+small `.dctl` files at 10% steps; `LUTs at strength` holds the DCTLs that point
+at LUTs on this computer.
