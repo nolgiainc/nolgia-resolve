@@ -88,6 +88,26 @@ DECODERS = {
     return {r0};
 }}
 """.format(pt=f(C.AL_PT), delta=f(C.AL["delta"]), gamma=f(C.AL["gamma"]), beta=f(C.AL["beta"]), c=f(C.AL["c"]), r0=f(C.AL["R0"])),
+    "flog": """__DEVICE__ float cam_decode(float y)
+{{
+    return y < {cut2} ? (y - {f}) / {e} : (_exp10f((y - {d}) / {c}) - {b}) / {a};
+}}
+""".format(cut2=f(C.FL["cut2"]), f=f(C.FL["f"]), e=f(C.FL["e"]), d=f(C.FL["d"]), c=f(C.FL["c"]), b=f(C.FL["b"]), a=f(C.FL["a"])),
+    "flog2": """__DEVICE__ float cam_decode(float y)
+{{
+    return y < {cut2} ? (y - {f}) / {e} : (_exp10f((y - {d}) / {c}) - {b}) / {a};
+}}
+""".format(cut2=f(C.FL2["cut2"]), f=f(C.FL2["f"]), e=f(C.FL2["e"]), d=f(C.FL2["d"]), c=f(C.FL2["c"]), b=f(C.FL2["b"]), a=f(C.FL2["a"])),
+    "dlog": """__DEVICE__ float cam_decode(float y)
+{
+    return y <= 0.14f ? (y - 0.0929f) / 6.025f : (_exp10f(3.89616f * y - 2.27752f) - 0.0108f) / 0.9892f;
+}
+""",
+    "nlog": """__DEVICE__ float cam_decode(float y)
+{{
+    return y < {cut2} ? _powf(y / {a}, 3.0f) - {b} : _expf((y - {d}) / {c});
+}}
+""".format(cut2=f(C.NL["cut2"]), a=f(C.NL["a"]), b=f(C.NL["b"]), d=f(C.NL["d"]), c=f(C.NL["c"])),
 }
 
 
@@ -263,3 +283,162 @@ def all_files():
     out["CST OUT/DWG to Rec.709 (NOLGIA display).dctl"] = cst_out()
     out["Corrections/Skin.dctl"] = skin()
     return out
+
+
+# ---------------------------------------------------------------- someone's own LUT, at a strength
+
+ENCODERS = {
+    "slog3": """__DEVICE__ float lut_encode(float x)
+{{
+    return x >= 0.01125f ? (420.0f + _log10f((x + 0.01f) / 0.19f) * 261.5f) / 1023.0f
+                         : (x * {span} / 0.01125f + 95.0f) / 1023.0f;
+}}
+""".format(span=f(171.2102946929 - 95.0)),
+    "logc3": """__DEVICE__ float lut_encode(float x)
+{{
+    return x > {cut} ? {c} * _log10f({a} * x + {b}) + {d} : {e} * x + {ff};
+}}
+""".format(cut=f(L3["cut"]), c=f(L3["c"]), a=f(L3["a"]), b=f(L3["b"]), d=f(L3["d"]), e=f(L3["e"]), ff=f(L3["f"])),
+    "logc4": """__DEVICE__ float lut_encode(float x)
+{{
+    return x >= {t} ? (_log2f({a} * x + 64.0f) - 6.0f) / 14.0f * {b} + {c} : (x - {t}) / {s};
+}}
+""".format(t=f(C.LC4_T), a=f(C.LC4_A), b=f(C.LC4_B), c=f(C.LC4_C), s=f(C.LC4_S)),
+    "vlog": """__DEVICE__ float lut_encode(float x)
+{
+    return x < 0.01f ? 5.6f * x + 0.125f : 0.241514f * _log10f(x + 0.00873f) + 0.598206f;
+}
+""",
+    "clog2": """__DEVICE__ float lut_encode(float x)
+{
+    return x < 0.0f ? -0.24136077f * _log10f(-x * 87.09937546f + 1.0f) + 0.092864125f
+                    : 0.24136077f * _log10f(x * 87.09937546f + 1.0f) + 0.092864125f;
+}
+""",
+    "clog3": """__DEVICE__ float lut_encode(float x)
+{
+    if (x < -0.014f) return -0.36726845f * _log10f(-x * 14.98325f + 1.0f) + 0.12783901f;
+    if (x <= 0.014f) return 1.9754798f * x + 0.12512219f;
+    return 0.36726845f * _log10f(x * 14.98325f + 1.0f) + 0.12240537f;
+}
+""",
+    "bmdfilm5": """__DEVICE__ float lut_encode(float x)
+{{
+    return x < {cut} ? {D} * x + {E} : {A} * _logf(x + {B}) + {Cc};
+}}
+""".format(cut=f(C.BMD5["cut"]), D=f(C.BMD5["D"]), E=f(C.BMD5["E"]), A=f(C.BMD5["A"]), B=f(C.BMD5["B"]),
+           Cc=f(C.BMD5["C"])),
+    "applelog": """__DEVICE__ float lut_encode(float x)
+{{
+    if (x >= {rt}) return {gamma} * _log2f(x + {beta}) + {delta};
+    if (x >= {r0}) return {c} * (x - {r0}) * (x - {r0});
+    return 0.0f;
+}}
+""".format(rt=f(C.AL["Rt"]), gamma=f(C.AL["gamma"]), beta=f(C.AL["beta"]), delta=f(C.AL["delta"]), r0=f(C.AL["R0"]),
+           c=f(C.AL["c"])),
+    "flog": """__DEVICE__ float lut_encode(float x)
+{{
+    return x < {cut1} ? {e} * x + {f} : {c} * _log10f({a} * x + {b}) + {d};
+}}
+""".format(cut1=f(C.FL["cut1"]), e=f(C.FL["e"]), f=f(C.FL["f"]), c=f(C.FL["c"]), a=f(C.FL["a"]), b=f(C.FL["b"]), d=f(C.FL["d"])),
+    "flog2": """__DEVICE__ float lut_encode(float x)
+{{
+    return x < {cut1} ? {e} * x + {f} : {c} * _log10f({a} * x + {b}) + {d};
+}}
+""".format(cut1=f(C.FL2["cut1"]), e=f(C.FL2["e"]), f=f(C.FL2["f"]), c=f(C.FL2["c"]), a=f(C.FL2["a"]), b=f(C.FL2["b"]), d=f(C.FL2["d"])),
+    "dlog": """__DEVICE__ float lut_encode(float x)
+{
+    return x <= 0.0078f ? 6.025f * x + 0.0929f : _log10f(x * 0.9892f + 0.0108f) * 0.256663f + 0.584555f;
+}
+""",
+    "nlog": """__DEVICE__ float lut_encode(float x)
+{{
+    if (x < {cut1}) {{ float v = x + {b}; return {a} * (v >= 0.0f ? _powf(v, 1.0f / 3.0f) : -_powf(-v, 1.0f / 3.0f)); }}
+    return {c} * _logf(x) + {d};
+}}
+""".format(cut1=f(C.NL["cut1"]), b=f(C.NL["b"]), a=f(C.NL["a"]), c=f(C.NL["c"]), d=f(C.NL["d"])),
+    "cineon": """__DEVICE__ float lut_encode(float x)
+{{
+    return (685.0f + 300.0f * _log10f(_fmaxf(x * {k} + {off}, 1e-10f))) / 1023.0f;
+}}
+""".format(k=f(1.0 - C.CINEON_OFFSET), off=f(C.CINEON_OFFSET)),
+    "acescct": """__DEVICE__ float lut_encode(float x)
+{{
+    return x <= 0.0078125f ? {a} * x + {b} : (_log2f(x) + 9.72f) / 17.52f;
+}}
+
+__DEVICE__ float lut_decode(float y)
+{{
+    return y <= 0.155251141552511f ? (y - {b}) / {a} : _exp2f(y * 17.52f - 9.72f);
+}}
+""".format(a=f(C.ACC_A), b=f(C.ACC_B)),
+}
+
+LUT_GAMUT = {"cineon": "rec709", "slog3": "sgamut3cine", "logc3": "awg3", "logc4": "awg4", "vlog": "vgamut",
+             "clog2": "cinemagamut", "clog3": "cinemagamut", "bmdfilm5": "bmdwg5", "applelog": "rec2020",
+             "acescct": "ap1", "flog": "rec2020", "flog2": "rec2020", "dlog": "dgamut", "nlog": "rec2020"}
+
+
+def lut_at_strength(lut_path, space, strength, name):
+    """A DCTL that puts someone's own LUT on the LOOK node at a strength.
+
+    space is what the LUT takes in: dwg (a look in the working space), acescct, rec709 (a Rec.709 look on
+    NOLGIA's display rendering), cineon or a camera log (a print or camera LUT that ends on a Rec.709
+    display). A LUT that ends on a display is taken back through the exact inverse of CST OUT, so LOOK then
+    CST OUT shows it as it was made, and the strength mixes it in the working space."""
+    pct = int(round(strength * 100))
+    path = lut_path.replace("\\", "/")
+    head = HEADER.format(name="%s %d%%" % (name, pct),
+                         what="The LUT at %s, at %d%%: it takes DaVinci Wide Gamut / Intermediate to the LUT's input "
+                              "(%s) and back. NOLGIA points at your own file and never copies it." % (path, pct, space))
+    parts = [head, "DEFINE_LUT(lut, %s)\n" % path,
+             "DEFINE_UI_PARAMS(strength, Strength, DCTLUI_SLIDER_FLOAT, %.2f, 0.0, 1.0, 0.01)\n\n" % strength]
+    if space == "dwg":
+        body = "    float3 o = APPLY_LUT(r, g, b, lut);\n"
+    elif space == "acescct":
+        parts += [DI_DECODE, DI_ENCODE, ENCODERS["acescct"]]
+        m_in, m_out = C.gamut_matrix("dwg", "ap1"), C.gamut_matrix("ap1", "dwg")
+        body = ("    float lr = di_decode(r), lg = di_decode(g), lb = di_decode(b);\n"
+                + _matrix_lines(m_in, ("lr", "lg", "lb"), ("ar", "ag", "ab")) + "\n"
+                + "    float3 c = APPLY_LUT(lut_encode(ar), lut_encode(ag), lut_encode(ab), lut);\n"
+                + "    float xr = lut_decode(c.x), xg = lut_decode(c.y), xb = lut_decode(c.z);\n"
+                + _matrix_lines(m_out, ("xr", "xg", "xb"), ("qr", "qg", "qb")) + "\n"
+                + "    float3 o = make_float3(di_encode(qr), di_encode(qg), di_encode(qb));\n")
+    else:
+        parts += [DI_DECODE, DI_ENCODE, DISPLAY_FUNCS]
+        back = ("    float R = tone_inverse(_powf(_clampf(c.x, 0.0f, {mx}), 2.4f));\n"
+                "    float G = tone_inverse(_powf(_clampf(c.y, 0.0f, {mx}), 2.4f));\n"
+                "    float B = tone_inverse(_powf(_clampf(c.z, 0.0f, {mx}), 2.4f));\n"
+                "    float a2 = _fmaxf(R, _fmaxf(G, B));\n"
+                "    if (a2 > 0.0f) {{\n"
+                "        R = a2 - gc_inverse((a2 - R) / a2) * a2;\n"
+                "        G = a2 - gc_inverse((a2 - G) / a2) * a2;\n"
+                "        B = a2 - gc_inverse((a2 - B) / a2) * a2;\n"
+                "    }}\n").format(mx=f(C.DISPLAY_MAX)) + _matrix_lines(C.REC709_TO_DWG, ("R", "G", "B"), ("qr", "qg", "qb")) + \
+               "\n    float3 o = make_float3(di_encode(qr), di_encode(qg), di_encode(qb));\n"
+        lin = "    float lr = di_decode(r), lg = di_decode(g), lb = di_decode(b);\n"
+        if space == "rec709":
+            to = (lin + _matrix_lines(C.DWG_TO_709, ("lr", "lg", "lb"), ("vr", "vg", "vb")) + "\n"
+                  + "    float a = _fmaxf(vr, _fmaxf(vg, vb));\n"
+                  + "    if (a > 0.0f) { vr = a - gc((a - vr) / a) * a; vg = a - gc((a - vg) / a) * a; vb = a - gc((a - vb) / a) * a; }\n"
+                  + "    float3 c = APPLY_LUT(_fminf(1.0f, _powf(tone(vr), 1.0f / 2.4f)), _fminf(1.0f, _powf(tone(vg), 1.0f / 2.4f)),\n"
+                  + "                         _fminf(1.0f, _powf(tone(vb), 1.0f / 2.4f)), lut);\n")
+        else:
+            parts.append(ENCODERS[space])
+            m = C.gamut_matrix("dwg", LUT_GAMUT[space])
+            compress = ""
+            if space == "cineon":
+                compress = ("    float a = _fmaxf(vr, _fmaxf(vg, vb));\n"
+                            "    if (a > 0.0f) { vr = a - gc((a - vr) / a) * a; vg = a - gc((a - vg) / a) * a; vb = a - gc((a - vb) / a) * a; }\n"
+                            "    vr = _fmaxf(vr, 0.0f); vg = _fmaxf(vg, 0.0f); vb = _fmaxf(vb, 0.0f);\n")
+            to = (lin + _matrix_lines(m, ("lr", "lg", "lb"), ("vr", "vg", "vb")) + "\n" + compress
+                  + "    float3 c = APPLY_LUT(lut_encode(vr), lut_encode(vg), lut_encode(vb), lut);\n")
+        body = to + back
+    parts.append("""
+__DEVICE__ float3 transform(int p_Width, int p_Height, int p_X, int p_Y, float p_R, float p_G, float p_B)
+{
+    float r = p_R, g = p_G, b = p_B;
+""" + body + """    return make_float3(r + (o.x - r) * strength, g + (o.y - g) * strength, b + (o.z - b) * strength);
+}
+""")
+    return "\n".join(parts)

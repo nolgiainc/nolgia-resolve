@@ -94,3 +94,20 @@ def install_look(lut_root, look, strength=1.0, space="dwg", size=33):
 def install_all_looks(lut_root, space="dwg"):
     """Every look at full strength and the 10% steps, so they are all in Resolve's LUT browser."""
     return [install_look(lut_root, look, 1.0, space) for look in L.LOOKS]
+
+
+def safe_name(text):
+    return "".join(c if c.isalnum() or c in " ._-()&+,'" else "_" for c in text).strip() or "LUT"
+
+
+def install_user_lut(lut_root, entry, strength=1.0, space=None):
+    """The strength DCTL for someone's own LUT (entry from userluts.index); returns the LOOK node's path.
+    Writes the 10% steps too, so the dial is in the node's LUT menu; never copies the LUT itself."""
+    space = space or entry["input"]
+    folder = "LUTs at strength/%s/%s" % (safe_name(entry["group"]), safe_name(entry["name"]))
+    pct = int(round(strength * 100))
+    for step in sorted(set(STRENGTH_STEPS + (100,)) | ({pct} if 0 < pct <= 100 else set())):
+        name = "%s %d%%.dctl" % (safe_name(entry["name"]), step)
+        _write_if_changed(os.path.join(lut_root, SUBFOLDER, folder, name),
+                          dctl.lut_at_strength(entry["path"], space, step / 100.0, entry["name"]))
+    return rel("%s/%s %d%%.dctl" % (folder, safe_name(entry["name"]), max(1, min(100, pct))))

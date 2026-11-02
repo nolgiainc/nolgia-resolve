@@ -221,6 +221,48 @@ def acescct_encode(x):
         return ACC_A * x + ACC_B
     return (math.log2(x) + 9.72) / 17.52
 
+FL = dict(cut1=0.00089, cut2=0.100537775223865, a=0.555556, b=0.009468, c=0.344676, d=0.790453, e=8.735631, f=0.092864)
+FL2 = dict(cut1=0.000889, cut2=0.100686685370811, a=5.555556, b=0.064829, c=0.245281, d=0.384316, e=8.799461, f=0.092864)
+
+def _flog_encode(x, k):
+    return k["e"] * x + k["f"] if x < k["cut1"] else k["c"] * math.log10(k["a"] * x + k["b"]) + k["d"]
+
+def _flog_decode(y, k):
+    return (y - k["f"]) / k["e"] if y < k["cut2"] else (10.0 ** ((y - k["d"]) / k["c"]) - k["b"]) / k["a"]
+
+def flog_encode(x):
+    return _flog_encode(x, FL)
+
+def flog_decode(y):
+    return _flog_decode(y, FL)
+
+def flog2_encode(x):
+    return _flog_encode(x, FL2)
+
+def flog2_decode(y):
+    return _flog_decode(y, FL2)
+
+def dlog_encode(x):  # DJI D-Log
+    return 6.025 * x + 0.0929 if x <= 0.0078 else math.log10(x * 0.9892 + 0.0108) * 0.256663 + 0.584555
+
+def dlog_decode(y):
+    return (y - 0.0929) / 6.025 if y <= 0.14 else (10.0 ** (3.89616 * y - 2.27752) - 0.0108) / 0.9892
+
+NL = dict(cut1=0.328, cut2=452.0 / 1023.0, a=650.0 / 1023.0, b=0.0075, c=150.0 / 1023.0, d=619.0 / 1023.0)
+
+def nlog_encode(x):  # Nikon N-Log
+    if x < NL["cut1"]:
+        v = x + NL["b"]
+        return NL["a"] * (v ** (1.0 / 3.0) if v >= 0 else -((-v) ** (1.0 / 3.0)))
+    return NL["c"] * math.log(x) + NL["d"]
+
+def nlog_decode(y):
+    if y < NL["cut2"]:
+        return (y / NL["a"]) ** 3 - NL["b"]
+    return math.exp((y - NL["d"]) / NL["c"])
+
+GAMUTS["dgamut"] = ([(0.71, 0.31), (0.21, 0.88), (0.09, -0.08)], D65)
+
 # camera id -> (label, curve name, gamut)
 CAMERAS = {
     "slog3": ("Sony S-Log3 / S-Gamut3.Cine", "slog3", "sgamut3cine"),
@@ -231,6 +273,10 @@ CAMERAS = {
     "clog3": ("Canon Log 3 / Cinema Gamut", "clog3", "cinemagamut"),
     "bmdfilm5": ("Blackmagic Film Gen 5 / Blackmagic Wide Gamut", "bmdfilm5", "bmdwg5"),
     "applelog": ("Apple Log / Rec.2020", "applelog", "rec2020"),
+    "flog": ("Fujifilm F-Log / F-Gamut", "flog", "rec2020"),
+    "flog2": ("Fujifilm F-Log2 / F-Gamut", "flog2", "rec2020"),
+    "dlog": ("DJI D-Log / D-Gamut", "dlog", "dgamut"),
+    "nlog": ("Nikon N-Log / N-Gamut", "nlog", "rec2020"),
 }
 
 CURVES = {
@@ -238,6 +284,8 @@ CURVES = {
     "logc4": (logc4_decode, logc4_encode), "vlog": (vlog_decode, vlog_encode), "clog2": (clog2_decode, clog2_encode),
     "clog3": (clog3_decode, clog3_encode), "bmdfilm5": (bmdfilm5_decode, bmdfilm5_encode),
     "applelog": (applelog_decode, applelog_encode), "acescct": (acescct_decode, acescct_encode),
+    "flog": (flog_decode, flog_encode), "flog2": (flog2_decode, flog2_encode), "dlog": (dlog_decode, dlog_encode),
+    "nlog": (nlog_decode, nlog_encode),
 }
 
 def camera_to_dwg(camera):
@@ -345,3 +393,12 @@ def acescct_to_dwg(rgb):
 def dwg_to_acescct(rgb):
     m = gamut_matrix("dwg", "ap1")
     return [acescct_encode(max(c, 1e-10)) if c > 0 else acescct_encode(c) for c in mat_vec(m, [di_decode(c) for c in rgb])]
+
+# Cineon, as DaVinci Resolve's own "Linear to Cineon Log" LUT defines it (scene linear 1.0 at code 685).
+CINEON_OFFSET = 10.0 ** ((95.0 - 685.0) / 300.0)
+
+def cineon_encode(x):
+    return (685.0 + 300.0 * math.log10(max(x * (1.0 - CINEON_OFFSET) + CINEON_OFFSET, 1e-10))) / 1023.0
+
+def cineon_decode(y):
+    return (10.0 ** ((y * 1023.0 - 685.0) / 300.0) - CINEON_OFFSET) / (1.0 - CINEON_OFFSET)
