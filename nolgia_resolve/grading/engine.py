@@ -383,6 +383,7 @@ class Grader(object):
         return {
             "looks": [l.as_dict() for l in L.LOOKS],
             "families": L.FAMILIES,
+            "names_note": L.NON_AFFILIATION,
             "strength": "0 to 1 (or a percent); the LOOK node holds the look at that strength, and the same folder has "
                         "10% steps to pick from Resolve's LUT menu.",
             "resolve_film_looks": {"files": resolve_own, "note": "DaVinci Resolve's own Film Looks LUTs, on this "

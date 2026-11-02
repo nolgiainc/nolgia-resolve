@@ -87,6 +87,8 @@ class GradeWindow(object):
             ui.Label({"ID": "GradeStatus", "Text": "Pick a look, or none, then Correct and grade.", "WordWrap": True,
                       "Weight": 0, "MinimumSize": [0, 54]}),
             ui.Label({"Text": FOOT, "WordWrap": True, "Weight": 0, "MinimumSize": [0, 54]}),
+            ui.Label({"ID": "NamesNote", "Text": looks.NON_AFFILIATION, "WordWrap": True, "Weight": 0,
+                      "MinimumSize": [0, 36]}),
         ])
         self.win = self.disp.AddWindow({"ID": GRADE_ID, "WindowTitle": "NOLGIA Grade",
                                         "Geometry": [580, 80, 620, 760], "MinimumSize": [520, 600]}, layout)

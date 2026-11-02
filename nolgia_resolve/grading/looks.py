@@ -32,6 +32,9 @@ from . import colour as C
 
 LOOK_GREY = 0.11  # display linear of mid grey, the same as CST OUT
 
+NON_AFFILIATION = ("Film stock and camera names are trademarks of their owners and describe the look each emulates. "
+                   "NOLGIA is not affiliated with or endorsed by them.")
+
 # ---------------------------------------------------------------- small helpers
 
 LUMA = C.npm(*C.GAMUTS["rec709"])[1]
@@ -269,8 +272,10 @@ def chain(*fs):
 # ---------------------------------------------------------------- the library
 
 class Look(object):
-    def __init__(self, slug, name, family, description, build):
+    def __init__(self, slug, name, family, description, build, aliases=(), emulates=None):
         self.slug, self.name, self.family, self.description, self._build = slug, name, family, description, build
+        self.aliases = tuple(aliases)
+        self.emulates = emulates  # the stock the look is modelled on, from its maker's published data; None if not
         self._f = None
 
     @property
@@ -280,7 +285,10 @@ class Look(object):
         return self._f
 
     def as_dict(self):
-        return {"slug": self.slug, "name": self.name, "family": self.family, "description": self.description}
+        out = {"slug": self.slug, "name": self.name, "family": self.family, "description": self.description}
+        if self.emulates:
+            out["emulates"] = self.emulates
+        return out
 
 
 PRINT_DYE = ((1.0, 0.03, 0.01), (0.07, 1.0, 0.03), (0.03, 0.12, 1.0))
@@ -399,7 +407,10 @@ def find(slug_or_name):
     if key in BY_SLUG:
         return BY_SLUG[key]
     for look in LOOKS:
-        if look.name.lower() == key:
+        if look.name.lower() == key or key in look.aliases:
+            return look
+    for look in LOOKS:  # "Kodak 2383 print" finds "Kodak 2383 print (NOLGIA)"
+        if look.name.lower().replace(" (nolgia)", "") == key.replace(" (nolgia)", ""):
             return look
     return None
 
@@ -419,6 +430,7 @@ def cube_text(look, size=33, space="dwg"):
     lines = ['TITLE "NOLGIA %s (%s)"' % (look.name, label),
              "# NOLGIA film look library, %s. %s" % (look.family, look.description),
              "# In and out: %s. Made by NOLGIA (nolgia.ai), our own look; GPL-3.0-or-later." % label,
+             "# " + NON_AFFILIATION,
              "LUT_3D_SIZE %d" % size, "DOMAIN_MIN 0 0 0", "DOMAIN_MAX 1 1 1"]
     n = size - 1
     for b in range(size):

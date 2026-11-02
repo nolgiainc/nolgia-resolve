@@ -137,16 +137,22 @@ TRADEMARKS = ("kodak", "fuji", "ilford", "agfa", "cinestill", "portra", "ektar",
 
 
 class LooksTest(unittest.TestCase):
-    def test_names_are_our_own(self):
-        """Generic names in our own words: no film maker's mark in a look's name, slug or description."""
+    def test_maker_names_are_marked(self):
+        """A look named after a stock or camera says it is NOLGIA's emulation of it, and the library carries the
+        non-affiliation line (the industry's style, e.g. a stock's name followed by the plugin's)."""
+        self.assertIn("not affiliated with or endorsed by", looks.NON_AFFILIATION)
         for look in looks.LOOKS:
-            text = (look.slug + " " + look.name + " " + look.description).lower()
-            for word in TRADEMARKS:
-                self.assertIsNone(re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(word), text), (word, look.slug))
+            named = [w for w in TRADEMARKS
+                     if re.search(r"(?<![a-z0-9])%s(?![a-z0-9])" % re.escape(w), look.name.lower())]
+            if named:
+                self.assertTrue(look.name.endswith("(NOLGIA)"), look.name)
+                self.assertTrue(look.emulates, look.name)
+            else:
+                self.assertFalse(look.name.endswith("(NOLGIA)"), look.name)
+        self.assertIn(looks.NON_AFFILIATION, looks.cube_text(looks.LOOKS[0], size=2))
 
     def test_library(self):
-        self.assertEqual(len(looks.LOOKS), 24)
-        self.assertEqual(len(set(look.slug for look in looks.LOOKS)), 24)
+        self.assertEqual(len(set(look.slug for look in looks.LOOKS)), len(looks.LOOKS))
         self.assertTrue(set(look.family for look in looks.LOOKS) <= set(looks.FAMILIES))
 
     def test_every_look_is_sane(self):
