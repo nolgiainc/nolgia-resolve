@@ -88,6 +88,9 @@ off or dialled back by the person at any time.
    | `agfa-vista` | Agfa Vista | The corner store classic: warm reds against slightly cool shadows. |
    | `arri-alexa-rec709` | ARRI Alexa Rec709 | The K1S1 LogC to Rec709 look: the neutral cinematic display transform. |
 
+   Film stock and camera names are trademarks of their owners and describe the
+   look each emulates. NOLGIA is not affiliated with or endorsed by them.
+
    Daylight footage with people usually wants Portra 400, Vision3 250D or
    Reala 500D; tungsten interiors Vision3 500T or 200T; neon and street light
    at night CineStill 800T; landscapes Ektar 100 or Velvia 50. The list also

@@ -100,6 +100,66 @@ Blender plugin's (it runs on its own thread and never calls Resolve); how the
 window shows it is [`nolgia_resolve/chatview.py`](nolgia_resolve/chatview.py)
 and [`nolgia_resolve/panel.py`](nolgia_resolve/panel.py).
 
+## Colour grading
+
+NOLGIA grades in Resolve the way colourists do, and it costs no NOLGIA
+credits: the plugin's own code does the work on your computer.
+
+- **Grade** in the NOLGIA window opens the NOLGIA Grade window: the film look
+  library to browse (each look with what it does), a strength slider, the
+  camera log, which clips, a hero clip to match to, and **Correct and grade**.
+  **Change look only** swaps the look or its strength on clips NOLGIA graded;
+  **Add all looks to the LUT list** puts every look in Resolve's LUT browser.
+  It works without signing in.
+- Or ask NOLGIA Agent in plain words ("correct every clip and match them to
+  clip 3, then give it a warm print look at 60%"), or your own agent through
+  NOLGIA's MCP tools (the `grade` command, [`COMMANDS.md`](COMMANDS.md)). An
+  agent's grade waits for your **Grade clips** click in the request window.
+  The grading is free; a NOLGIA Agent turn is billed as usual.
+
+Every clip gets a new color version, **NOLGIA grade**, so your own grade
+stays in the clip's Versions menu. In it, eight labelled nodes you can keep
+working on:
+
+    CST IN > BALANCE > EXPOSURE > CONTRAST > SAT > SKIN > LOOK > CST OUT
+
+- **CST IN** takes the camera's log to DaVinci Wide Gamut / DaVinci
+  Intermediate: Sony S-Log3, ARRI LogC3 and LogC4, Panasonic V-Log, Canon Log
+  2 and 3, Blackmagic Film Gen 5, Apple Log (or Rec.709). Each is a DCTL from
+  the maker's published curve and primaries; on a 144 patch chart they give
+  the same picture as Resolve's own colour management (every camera within
+  0.0014 in DaVinci Intermediate, the precision of a 16-bit still).
+- **BALANCE** and **EXPOSURE** are the Offset wheel (a CDL offset in log, the
+  colourist's printer lights), measured from each clip's own frames; with a
+  hero, each clip's white and level are matched to the hero's. **CONTRAST**
+  and **SAT** are the Primaries' Contrast, Pivot and Saturation.
+- **SKIN** pulls skin hues onto the skin line (only skin hues move).
+- **LOOK** is a look from the library at a strength. Resolve's Key Output
+  Gain does not scale a node's LUT, so the strength is a small DCTL around the
+  look's LUT (`DEFINE_LUT`, mixed); the same folder holds every 10% step to
+  pick from the node's LUT menu, and the DCTL has a Strength slider in the
+  DCTL plugin.
+- **CST OUT** renders to Rec.709 gamma 2.4 with a filmic tone curve and a soft
+  gamut compression, exactly invertible.
+
+**The film look library** is NOLGIA's own: 26 looks written as code, baked to
+LUTs on your computer. A look named after a film stock is NOLGIA's emulation of
+it, modelled on the maker's published technical data (characteristic curves,
+density range and the colour behaviour each sheet describes) and named in the
+industry's style with "(NOLGIA)". Print: Kodak 2383 print (and warm and cool
+timings), Fujifilm Eterna-CP 3513DI print, Classic Print. Negative: Kodak
+Vision3 50D 5203, 250D 5207, 200T 5213 and 500T 5219, Fujifilm Eterna 250D 8563
+and Eterna Vivid 160, Kodak Portra 400, Kodak Ektar 100, Fujifilm Superia X-TRA
+400. Reversal: Fujifilm Velvia 50 and Provia 100F. Process: Bleach Bypass, Cross
+Process. Black and white: Kodak Tri-X 400, Ilford HP5 Plus, Ilford Ortho Plus 80.
+Creative: Neutral Film, Teal and Orange, Faded Film, Day for Night, Golden Hour.
+They are built for the DaVinci Wide Gamut / Intermediate working space (and
+ACEScct in ACES projects) and installed in `NOLGIA Grade` in Resolve's LUT
+folder when first used. Resolve's own Film Looks LUTs stay Resolve's: NOLGIA can
+point a node at them on your computer and never copies them. Film stock and
+camera names are trademarks of their owners and describe the look each
+emulates. NOLGIA is not affiliated with or endorsed by them.
+
 ## Settings
 
 Settings in the NOLGIA window:
@@ -163,6 +223,7 @@ of the timeline (Resolve's own API numbers frames from the start timecode,
 | `save` | none | saves the open project: `{project, saved}` |
 | `open` | `project`, `folder?` | opens another project: `{project, folder}`. With the NOLGIA window open it always asks you first (Resolve cannot tell whether there are unsaved changes). |
 | `dit` | `subcommand` (`offload`, `verify`, `manifest`, `inventory`, `rename`, `undo`, `report`) and its fields, or `action: "status"`/`"cancel"` with `job_id` | camera-card DIT through the NOLGIA CLI, the same contract as the Adobe plugin's (see above). Writes (`offload`, `rename` with `apply`, `undo`) are planned with the CLI's dry run and wait for your Approve in the NOLGIA window; with no window open they do not run. It hands back a job within about 2 s so Resolve's window stays responsive; follow it with `status`. Workflow: `presets/resolve/dit.md`. |
+| `grade` | `action` (`apply`, `look`, `looks`, `inspect`), `clips`, `camera`, `match`, `look`, `strength`, `contrast`, `saturation`, `skin` | colour management, measured white balance and exposure, matching to a hero clip and a library look at a strength, as eight labelled nodes in a new color version of each clip (see Colour grading). `apply` and `look` wait for the person's Grade clips click in the NOLGIA window. Free. |
 
 **LUTs.** NOLGIA's film-look color presets come from the API it uses
 (`GET /color-presets`, public). `import_asset` installs a LUT into a `NOLGIA`
@@ -230,6 +291,16 @@ the project since it was last saved.
 
 ## Known limits
 
+- Grading: Resolve's scripting cannot add nodes, set a DCTL's sliders, or
+  change Key Output Gain on a node's LUT, so the node tree comes from a grade
+  still NOLGIA writes (`ApplyGradeFromDRX`) and strengths are DCTLs. A grade
+  replaces the tree of a new color version, never yours. Exposure as an
+  Offset in DaVinci Intermediate lifts the deepest blacks a little when it
+  brightens (the toe of the curve is linear), as printer lights do in log.
+  Matching shots of different framings is a starting point: the values sit on
+  the BALANCE and EXPOSURE nodes for you to adjust. In colour managed and ACES
+  projects nothing is measured, and SKIN is left empty in ACES. While a grade
+  runs (a few seconds a clip) the NOLGIA window does not answer.
 - Resolve's scripting cannot tell whether a project has unsaved changes, so
   `info` says `unsaved_changes: null`, and `open` asks you first.
 - Commands run one at a time on the NOLGIA script's own thread, the only one
@@ -311,6 +382,23 @@ the project since it was last saved.
   stays as it was before 0.2.3.
 
 ## Tested on
+
+0.3.0 (November 2, 2026): colour grading (the `grade` command and the NOLGIA
+Grade window). Run in DaVinci Resolve Studio 21.1.1 on Windows 11 (Python
+3.11 in Resolve's script runner, and Resolve's own Python 3.14 for scripts):
+the camera transforms against Resolve's own colour management (a 144 patch
+chart, all eight logs and ACEScct); every DCTL against its Python twin (within
+0.0014); the node tree applied from a written still, read back by label and in
+the Primaries palette; correction and matching on three S-Log3 clips made from
+our own footage with a second camera's mistakes added (clip 1 a stop under and
+cool, clip 2 half a stop over and green): clip 1's cast was found within 0.05
+stop on every channel, clip 2's green within 0.02 stop (its red and blue moved
+up to 0.1 stop more, where its whites differ from the hero's); the look library and the strength steps on the same clips; the
+NOLGIA Grade window driven by window messages; and the agent path against the
+mock API, with the request window approved by a click (window messages) after
+its buttons came on. Unit tests (tests/test_grading.py). Not yet run on macOS
+or Linux, and not yet against the real NOLGIA API (its `nolgia_app_grade` tool
+is waiting for review).
 
 0.2.10 (November 2, 2026): the chat shows work NOLGIA Agent finished in the
 background as one grey line, "Background work finished. NOLGIA is reporting

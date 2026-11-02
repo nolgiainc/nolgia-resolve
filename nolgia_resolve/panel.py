@@ -271,6 +271,7 @@ class Panel:
         self._clock_moved = []
         self._full_tick_at = 0.0
         self._request_on_at = None
+        self.gradewin = None
         global current
         current = self
 
@@ -310,6 +311,8 @@ class Panel:
             ui.HGroup({"Weight": 0}, [
                 ui.Label({"ID": "ChatTitle", "Text": "NOLGIA Agent", "Font": bold}),
                 ui.HGap(0, 1),
+                ui.Button({"ID": "Grade", "Text": "Grade", "Weight": 0, "FocusPolicy": NO_FOCUS,
+                           "ToolTip": "The film look library and one-click correction, in this Resolve (no credits)"}),
                 ui.Button({"ID": "NewChat", "Text": "New chat", "Weight": 0, "FocusPolicy": NO_FOCUS}),
             ]),
             ui.Label({"ID": "ChatIntro", "Text": "Tell NOLGIA Agent what to do in this DaVinci Resolve. Try one of these:",
@@ -384,6 +387,7 @@ class Panel:
         on.Send.Clicked = click("Send", lambda ev: self._send_from_box())
         on.Stop.Clicked = click("Stop", lambda ev: chat.stop())
         on.NewChat.Clicked = click("NewChat", lambda ev: chat.new_chat())
+        on.Grade.Clicked = click("Grade", lambda ev: self.grade_window().show())
         on.OpenWeb.Clicked = click("OpenWeb", lambda ev: self._open(chat.view()["session_url"] or AGENT_URL))
         on.ChatAction.Clicked = click("ChatAction", self._on_chat_action)
         on.Box.TextChanged = self._guard(self._on_box_changed)
@@ -707,6 +711,7 @@ class Panel:
             pass
         self.controller.shutdown(wait=3.0)
         self._close_request()
+        self._close_grade()
         self.disp.ExitLoop()
 
     def _note_project(self):
@@ -934,6 +939,16 @@ class Panel:
         win.On[REQUEST_ID].Close = self._guard(lambda ev: self._close_request())
         self.request_win = win
         return win
+
+    def grade_window(self):
+        if self.gradewin is None:
+            from .gradewin import GradeWindow
+            self.gradewin = GradeWindow(self)
+        return self.gradewin
+
+    def _close_grade(self):
+        if self.gradewin is not None:
+            self.gradewin.hide()
 
     def _close_request(self):
         win = self.request_win
@@ -1166,6 +1181,7 @@ class Panel:
             except Exception:
                 pass
             self._close_request()
+            self._close_grade()
             if self._finish_quit:
                 self._quit_resolve()
         return True

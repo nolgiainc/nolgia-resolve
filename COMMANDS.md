@@ -192,3 +192,77 @@ renames it).
 `import_asset`, `preview` and `export` fail with a plain message while
 Resolve shows only its Project Manager (no page open, `info` says `page:
 null`); `open` works from that state.
+
+## `grade`
+
+Colour grading done by the plugin itself, in this Resolve (0.3.0 and newer):
+colour management from the camera's log, white balance and exposure measured
+from each clip, shot matching to a hero clip, and a look from NOLGIA's own film
+look library at a strength. It costs no NOLGIA credits.
+
+| Argument | |
+|---|---|
+| `action` | `apply` (default), `look`, `looks` or `inspect` |
+| `clips` | `all` (default), `selected`, `current`, or clip numbers `[1, 3]` (1 is the first clip in timeline order, as the Color page numbers them) |
+| `camera` | `auto` (default: the clip's metadata, a Sony sidecar XML or the file name) or `slog3`, `logc3`, `logc4`, `vlog`, `clog2`, `clog3`, `bmdfilm5`, `applelog`, `rec709` |
+| `correct` | `apply`: measure and set white balance and exposure (default true) |
+| `match` | the hero clip's number: the others' colour and level are matched to it; the hero keeps its own white unless `neutral_hero` |
+| `exposure` | `auto` (default: `match` with a hero, else `even`), `match`, `even` (halfway to the clips' median, at most a stop) or `keep` |
+| `look` | a look's slug or name from the library, or `none` |
+| `strength` | 0 to 1, or a percent (60 is 60%); default 1 |
+| `contrast`, `saturation` | Primaries Contrast (pivot at DaVinci Intermediate mid grey, 0.336) and Saturation; 1 is none |
+| `skin` | the skin line node (default true) |
+| `neutral_hero` | also take the hero's white to neutral |
+| `frames` | frames measured per clip, 1 to 5 (default 3) |
+
+`apply` and `look` change clips, so they wait in the NOLGIA window for the
+person's **Grade clips** click (the request window's rules: buttons on after a
+second, only a click made after that counts); with no window open they do not
+run. `looks` and `inspect` only read.
+
+**`apply`.** Each clip gets a new local color version, `NOLGIA grade` (then
+`NOLGIA grade 2`, ...), so the person's own grade stays in the clip's Versions
+menu. In it, through `Graph.ApplyGradeFromDRX`, eight labelled serial nodes:
+
+| Node | Holds |
+|---|---|
+| 01 CST IN | the camera log to DaVinci Wide Gamut / DaVinci Intermediate (a DCTL; it gives the same picture as Resolve's own colour management) |
+| 02 BALANCE | white balance on the Offset wheel, per channel (a CDL offset in log) |
+| 03 EXPOSURE | exposure on the Offset wheel (one stop is 0.0733 in DaVinci Intermediate) |
+| 04 CONTRAST | Primaries Contrast and Pivot |
+| 05 SAT | Primaries Saturation |
+| 06 SKIN | the skin line DCTL (skin hues only) |
+| 07 LOOK | the look at its strength: a DCTL that applies the look's .cube with `DEFINE_LUT` and mixes it |
+| 08 CST OUT | DaVinci Wide Gamut / Intermediate to Rec.709 gamma 2.4 (a DCTL with a filmic tone curve, exactly invertible) |
+
+White balance and exposure are measured on frames exported after CST IN, in
+scene light: the white is the least saturated bright pixels; skin is found
+after the white's cast is taken out; exposure follows the white, averaged with
+skin when the two agree within half a stop. A second measurement after the
+first pass corrects what is left. In a colour managed or ACES project CST IN
+and CST OUT are left to Resolve and nothing is measured; the look is the
+project's working space version.
+
+Result: `{project, timeline, color_science, hero, look, strength, lut_folder,
+seconds, cost, clips: [{clip, name, camera, camera_found_by, version,
+your_version, balance_stops: [r, g, b], exposure_stops, matched_on, measured,
+residual_after_first_pass, second_pass?, nodes: [{node, label, lut}]}],
+note?, warning?}`. When `camera` is `auto` and a clip says nothing about its
+log, it fails with `result: {needs_camera: [...], choices: [...]}`: ask the
+person.
+
+**`look`.** Sets another look (or strength) on the LOOK node of clips NOLGIA
+graded, found by its label, leaving every other node as it is; `none` switches
+the node off. Result: `{look, strength, lut, changed, skipped}`.
+
+**`looks`.** The library (`slug`, `name`, `family`, `description`), the
+cameras, and the names of Resolve's own Film Looks LUTs on this computer
+(Resolve ships them; NOLGIA only points a node at them, never copies them).
+
+**`inspect`.** Per clip: the camera log found and how, the current color
+version and its nodes (label, LUT, tools); and the project's colour science.
+
+The files live in `NOLGIA Grade` in Resolve's LUT folder (`CST IN`, `CST OUT`,
+`Corrections`, `Looks/<family>`, `Looks ACEScct/<family>`), written by the
+plugin when first needed: each look as a 33 point `.cube` and its strengths as
+small `.dctl` files at 10% steps.
