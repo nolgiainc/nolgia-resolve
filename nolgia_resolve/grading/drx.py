@@ -40,8 +40,6 @@ TRACK_BODY = bytes.fromhex(
     "b3c49d0d1a2020be0128b401380140554a00520c0a0a08818080800c1202100260ff99e2ce06")
 
 NODE_SPACING = 240
-ROW_SPACING = 230
-ROW_LENGTH = 4
 
 
 def _varint(value):
@@ -186,9 +184,8 @@ class Node(object):
 
 
 def node_position(i, count):
-    """Rows of four, left to right, so the whole tree shows in a normal node editor at Resolve's own zoom."""
-    row, col = divmod(i - 1, ROW_LENGTH if count > ROW_LENGTH + 1 else count)
-    return 190 + NODE_SPACING * col, 180 + ROW_SPACING * row
+    """One row, left to right. (Resolve 21.1.1 lays a serial tree applied from a still out in one row itself.)"""
+    return 190 + NODE_SPACING * (i - 1), 180
 
 
 def graph_body(nodes, width=1920, height=1080):
