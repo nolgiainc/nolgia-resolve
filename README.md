@@ -416,6 +416,16 @@ the project since it was last saved.
 
 ## Tested on
 
+0.3.2 (November 2, 2026): a clip NOLGIA keeps as the model's original. Since
+nolgia-api #1363 an asset's download link is the file the model delivered. A
+Seedance 2.5 720p original is H.264 High 4:4:4 in a QuickTime file, which
+editors do not decode, so the plugin imports such a clip as its 8-bit H.264
+copy; an HEVC 10-bit original (Seedance 2.5 1080p, every Topaz restore) is
+imported as the model made it. Checked by the unit tests (the copy is fetched
+for a 4:4:4 original, the original for HEVC 10-bit) and against the live API's
+asset records; the import itself was not run in Resolve for this release, and
+not yet on macOS.
+
 0.3.1 (November 2, 2026): the film LUTs already on the computer. Run in
 DaVinci Resolve Studio 21.1.1 on Windows 11: the list read from Resolve's LUT
 folder (its Film Looks and the camera makers' LUTs that come with it) and from
