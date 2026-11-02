@@ -1155,6 +1155,22 @@ def _project_assets(project_id, api):
     return media, skipped
 
 
+def _import_source(asset):
+    """The file DaVinci Resolve imports for an asset: (url, mime type, copy?).
+
+    Since nolgia-api #1363 an asset's signed_url is the model's original.
+    Seedance 2.5's 720p original is H.264 High 4:4:4 in a QuickTime file, a
+    profile editors do not decode, so such an asset is imported as its 8-bit
+    H.264 playback copy. Every other original (HEVC 10-bit, 4:2:0) is
+    imported as the model made it."""
+    original = asset.get("original") or {}
+    playback = asset.get("playback") or {}
+    if (str(original.get("pix_fmt") or "").startswith("yuv444") and playback.get("status") == "ready"
+            and playback.get("signed_url")):
+        return playback["signed_url"], playback.get("mime_type") or "video/mp4", True
+    return asset.get("signed_url"), asset.get("mime_type"), False
+
+
 def _prepare_asset(asset_id, api, snapshot, asset=None):
     if not (asset or {}).get("signed_url"):
         try:
@@ -1163,7 +1179,7 @@ def _prepare_asset(asset_id, api, snapshot, asset=None):
             if err.status == 404:
                 raise CommandError("NOLGIA has no asset %s in this account." % asset_id) from None
             raise
-    url = (asset or {}).get("signed_url")
+    url, mime, compatible = _import_source(asset or {})
     if not url:
         raise CommandError("NOLGIA did not give a download link for asset %s." % asset_id)
     name = asset.get("display_name") or asset_id
@@ -1175,29 +1191,32 @@ def _prepare_asset(asset_id, api, snapshot, asset=None):
             head = api.download(url, temp)
         except NetworkError as err:
             raise CommandError("Could not download the asset from NOLGIA (%s)." % err) from None
-        if _is_cube(name, asset.get("mime_type"), head):
+        if _is_cube(name, mime, head):
             keep_temp = True  # install_lut copies it into the LUT folder, then removes it
             filename = _lut_filename(os.path.splitext(name)[0], asset_id)
             return {"kind": "lut", "path": temp, "filename": filename, "temp_dir": temp_dir, "asset_id": asset_id}
-        ext = util.import_extension(name, asset.get("mime_type"), head)
+        ext = util.import_extension(name, mime, head)
         kind = util.IMPORT_KINDS.get(ext)
         if kind not in MEDIA_KINDS:
             raise CommandError(
                 "DaVinci Resolve cannot import %s (%s). It imports images, video, audio and .cube LUTs from "
-                "NOLGIA." % (name, asset.get("mime_type") or ext or "unknown type"))
+                "NOLGIA." % (name, mime or ext or "unknown type"))
         filename = util.safe_filename(os.path.splitext(name)[0], asset_id) + ext
         project = util.safe_filename((snapshot or {}).get("document", {}).get("name") or "", "Untitled Project")
         folder = os.path.join(paths.import_dir(), project, util.safe_filename(asset_id))
         os.makedirs(folder, exist_ok=True)
         final = os.path.join(folder, filename)
-        size = asset.get("size_bytes")
+        size = None if compatible else asset.get("size_bytes")
         if not (os.path.isfile(final) and (not size or os.path.getsize(final) == size)):
             # (The same asset imported before is kept: Resolve may be using the file.)
             shutil.move(temp, final)
     finally:
         if not keep_temp:
             shutil.rmtree(temp_dir, ignore_errors=True)
-    return {"kind": kind, "path": final, "ext": ext, "asset_id": asset_id}
+    item = {"kind": kind, "path": final, "ext": ext, "asset_id": asset_id}
+    if compatible:
+        item["compatible_copy"] = True
+    return item
 
 
 def _describe(items):

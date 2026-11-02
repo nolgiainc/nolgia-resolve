@@ -603,6 +603,28 @@ class PrepareImport(unittest.TestCase):
         self.assertEqual(item["path"], os.path.join(self.tmp, "imports", "My_ Film", "a-1", "clip.mp4"))
         self.assertTrue(os.path.isfile(item["path"]))
 
+    def test_a_444_original_comes_in_as_its_h264_copy(self):
+        # Since nolgia-api #1363 signed_url is the model's original. A 4:4:4
+        # QuickTime original (Seedance 2.5 720p) is imported as its playback
+        # copy; an HEVC 10-bit original as the model made it.
+        mp4 = b"\x00\x00\x00\x18ftypisom"
+        four = {"signed_url": "original", "display_name": "Runner", "mime_type": "video/quicktime", "size_bytes": 99,
+                "original": {"mime_type": "video/quicktime", "size_bytes": 99, "video_codec": "h264", "pix_fmt": "yuv444p"},
+                "playback": {"status": "ready", "signed_url": "copy", "mime_type": "video/mp4"}}
+        fetched = []
+        def data(url):
+            fetched.append(url)
+            return mp4 + url.encode()
+        out = ops_module.prepare_import(command("import_asset", {"asset_id": "a-444"}), self.api(four, data), {})
+        item = out["items"][0]
+        self.assertEqual(fetched, ["copy"])
+        self.assertEqual((item["kind"], item["ext"], item.get("compatible_copy")), ("video", ".mp4", True))
+        hevc = dict(four, signed_url="original", mime_type="video/mp4",
+                    original={"mime_type": "video/mp4", "size_bytes": 99, "video_codec": "hevc", "pix_fmt": "yuv420p10le"})
+        out = ops_module.prepare_import(command("import_asset", {"asset_id": "a-hevc"}), self.api(hevc, data), {})
+        self.assertEqual(fetched[-1], "original")
+        self.assertNotIn("compatible_copy", out["items"][0])
+
     def test_cube_by_name_or_content(self):
         cube = b'TITLE "Warm"\nLUT_3D_SIZE 2\n' + b"0 0 0\n" * 8
         for name in ("Warm look.cube", "warm.txt"):
