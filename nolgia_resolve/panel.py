@@ -183,7 +183,9 @@ QUIT_NOTE_SECONDS = 10.0
 UNTITLED_PROJECT = "Untitled Project"
 STATUS_LINES_PX = 40
 FOOTER_LINES_PX = 36
-COST_LINES_PX = 54
+# The cost line is four lines at the minimum width since 0.3.3 ("about N
+# credits a turn on your model, never more than C for its own work").
+COST_LINES_PX = 72
 BOX_PX = 56
 ACTIVITY_MAX_PX = 220
 # Button text sets a minimum width: kept short so no button widens the window.

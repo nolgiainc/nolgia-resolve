@@ -31,7 +31,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-from . import AGENT_URL, APP, BILLING_URL, COST_LINE, COST_LINE_RATE
+from . import AGENT_URL, APP, BILLING_URL, COST_LINE, COST_LINE_RATE, COST_LINE_TYPICAL, COST_LINE_TYPICAL_CAP
 from .api import ApiError, NetworkError, Unauthorized
 from .mainthread import NoQuiet
 
@@ -91,9 +91,14 @@ def _sort_key(row):
     return (time_key(row.get("created_at")), str(row.get("id") or ""))
 
 
+def _whole(value):
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else None
+
+
 def turn_rate(agent, models):
-    """What one turn costs on the Agent's brain: its catalogue rate (the
-    default brain's when none is chosen), or None when unknown."""
+    """What one turn costs on the Agent's brain (the default brain's when none
+    is chosen): {"rate", "typical", "cap"} from the catalogue, typical and cap
+    None when the API does not publish them; None when the brain is unknown."""
     if not agent or not isinstance(models, list):
         return None
     chosen = None
@@ -106,15 +111,31 @@ def turn_rate(agent, models):
             chosen = model
         if chosen is not None:
             break
-    credits = chosen.get("turn_credits") if chosen else None
-    if isinstance(credits, int) and not isinstance(credits, bool) and credits > 0:
-        return credits
-    return None
+    rate = _whole(chosen.get("turn_credits")) if chosen else None
+    if rate is None:
+        return None
+    typical = _whole(chosen.get("typical_turn_credits"))
+    if typical is not None and typical < rate:
+        typical = None
+    cap = _whole(chosen.get("turn_ceiling_credits"))
+    if cap is not None and (typical is None or cap < typical):
+        cap = None
+    return {"rate": rate, "typical": typical, "cap": cap}
 
 
 def cost_line(rate):
-    """The line under the box."""
-    return COST_LINE_RATE.replace("{credits}", str(rate)) if rate else COST_LINE
+    """The line under the box: the typical turn and the cap when the API
+    publishes them, else the flat minimum, else the lowest rate. A bare number
+    is read as the flat minimum."""
+    if not rate:
+        return COST_LINE
+    if isinstance(rate, int):
+        rate = {"rate": rate, "typical": None, "cap": None}
+    if rate.get("typical") and rate.get("cap"):
+        return COST_LINE_TYPICAL_CAP.replace("{typical}", str(rate["typical"])).replace("{cap}", str(rate["cap"]))
+    if rate.get("typical"):
+        return COST_LINE_TYPICAL.replace("{typical}", str(rate["typical"]))
+    return COST_LINE_RATE.replace("{credits}", str(rate["rate"]))
 
 
 def failure_text(row):
