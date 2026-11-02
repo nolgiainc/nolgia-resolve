@@ -19,6 +19,7 @@ import tempfile
 import time
 
 from . import dit, paths, still, timecode
+from .grading import engine as grading_engine
 from .core import util
 from .core.api import ApiError, NetworkError
 from .core.commands import CommandError
@@ -741,6 +742,23 @@ class Ops:
         job = jobs.start(cli, dit.argv(args))
         # This runs on Resolve's main thread: hand back a job rather than hold the UI.
         return jobs.wait(job, 2.0)
+
+    # ------------------------------------------------------------ grade
+
+    def grade_approval(self, command):
+        """A grade that changes clips (apply, look) waits for the person's Approve, whoever sent it."""
+        if command.args.get("action") not in ("apply", "look"):
+            return None
+        title, lines = grading_engine.describe(command.args, command.caller_label)
+        return ApprovalRequest(
+            title, lines,
+            headless_error="Grading clips needs the person's OK in the NOLGIA window, and DaVinci Resolve has no "
+            "NOLGIA window open, so it did not run.",
+            approve_label="Grade clips",
+        )
+
+    def do_grade(self, args, prepared, command):
+        return grading_engine.Grader(self, self.log).run(args)
 
     # ------------------------------------------------------------ save, open
 
