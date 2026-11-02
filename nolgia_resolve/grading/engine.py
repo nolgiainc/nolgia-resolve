@@ -469,6 +469,10 @@ class Grader(object):
     def look_path(self, root, args, science):
         if args.get("lut"):
             entry = self.lut_entry(args)
+            if not userluts.path_is_safe(entry["path"]):
+                raise CommandError("%s: its folder or file name has a bracket, comma, semicolon or quote, and DaVinci "
+                                   "Resolve stops with an error on a DCTL that points at such a path. Move or rename it, "
+                                   "then try again." % entry["path"])
             space = entry["input"] if args.get("lut_input", "auto") == "auto" else args["lut_input"]
             if space == "unsupported":
                 raise CommandError("%s %s." % (entry["name"], entry.get("note", "takes a log NOLGIA cannot convert to yet")))
