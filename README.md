@@ -84,9 +84,11 @@ suggests a few things to ask; a click puts one in the box.
 - **One message is one turn.** While NOLGIA Agent works, Send waits (you can
   type your next message meanwhile); Stop ends the turn. A question from the
   Agent comes with its answers as buttons below the chat.
-- **What it costs.** Each turn costs credits on your NOLGIA Agent's model (the
-  window says how many, from NOLGIA), and anything the Agent generates with
-  NOLGIA is priced as usual. Each reply shows what its turn cost.
+- **What it costs.** The window says what a turn typically costs on your
+  NOLGIA Agent's model and the most a turn's own work is billed ("about 120
+  credits a turn on your model, never more than 200 for its own work" on
+  Claude Opus 5.5, from NOLGIA). Anything the Agent generates with NOLGIA is
+  priced as usual. Each reply shows what its turn cost.
 - **What it needs.** Connected and Allow NOLGIA Agent on (the window offers
   the one click when either is off), and a NOLGIA Agent on your account (open
   nolgia.ai/agent once to start it).
@@ -415,6 +417,14 @@ the project since it was last saved.
   stays as it was before 0.2.3.
 
 ## Tested on
+
+0.3.3 (November 3, 2026): the cost line under the chat says what a turn
+typically costs on your model and the cap on a turn's own work ("about 120
+credits a turn on your model, never more than 200 for its own work" on Claude
+Opus 5.5, from nolgia-api #1378) instead of the flat minimum ("each turn from
+70 credits"); the line has room for four lines. The shared core matches
+NOLGIA for Blender 0.2.5. Unit tests against the mock API; not run in DaVinci
+Resolve, and not yet on macOS.
 
 0.3.2 (November 2, 2026): a clip NOLGIA keeps as the model's original. Since
 nolgia-api #1363 an asset's download link is the file the model delivered. A

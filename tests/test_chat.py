@@ -120,8 +120,10 @@ class ChatWindowTest(unittest.TestCase):
         for element_id in ("Thread", "NewChat", "Stop", "ChatAction", "ChatNotice", "Option0"):
             self.assertFalse(self.visible(element_id), element_id)
         cost = self.item("ChatCost").Text
-        self.assertEqual(cost, "NOLGIA Agent works right here, each turn from 70 credits on your model. "
+        self.assertEqual(cost, "NOLGIA Agent works right here, about 120 credits a turn on your model, "
+                               "never more than 200 for its own work. "
                                "You can also use Claude, Cursor, Codex or another agent with NOLGIA connected.")
+        self.assertNotIn("without asking", cost)
         self.assertNotIn("free", cost.lower())
         self.win.fire("Example0")
         self.assertEqual(self.item("Box").PlainText, chatview.EXAMPLES[0][1])
@@ -134,6 +136,13 @@ class ChatWindowTest(unittest.TestCase):
         self.sign_in()
         self.assertEqual(self.item("ChatCost").Text, COST_LINE)
         self.assertIn("each turn from 10 credits", COST_LINE)
+
+    def test_cost_line_from_an_api_with_only_the_flat_rate(self):
+        rate = core_chat.turn_rate({"model": "claude-opus-5-5"}, [{"model": "claude-opus-5-5", "turn_credits": 70}])
+        self.assertEqual(rate, {"rate": 70, "typical": None, "cap": None})
+        self.assertIn("each turn from 70 credits on your model.", core_chat.cost_line(rate))
+        typical_only = [{"model": "a", "turn_credits": 10, "typical_turn_credits": 35, "default": True}]
+        self.assertIn("about 35 credits a turn on your model. You", core_chat.cost_line(core_chat.turn_rate({"id": "agent"}, typical_only)))
 
     def test_send_pins_a_new_chat_to_this_resolve_and_draws_the_reply(self):
         self.sign_in()
