@@ -93,6 +93,7 @@ and optionally:
 | `append` | `true` to add the media to the end of the current timeline, in order (a new timeline named `NOLGIA timeline` when none is open, made from the clips) |
 | `apply_to` | for a single LUT: `current` (the video clip under the playhead), `selected` (the clips selected in the timeline), `current_track` (every clip on the video track of the clip under the playhead) or `all` (every video clip in the timeline) |
 | `node` | the grade node to set the LUT on, from 1; default 1 |
+| `with_matte` | `false` to bring a green screen or keep-me result in without its matte (see below); default `true` |
 
 Images, video and audio are imported into the bin. With `append`, each clip
 goes after the timeline's last clip, whatever its track (that is how Resolve
@@ -106,6 +107,17 @@ list is refreshed. A color
 preset replaces its own older copy; a library LUT never replaces another
 file (it gets a number). 3D models are refused. With `project_id`, other
 kinds of assets are skipped and listed in `skipped`.
+
+A green screen or keep-me render's result names the matte its composite used
+(`matte_layer_asset_id`, a grey MP4, white = the person). Unless `with_matte`
+is `false`, that matte is downloaded too and attached to the clip as its clip
+matte (`MediaStorage.AddClipMattesToMediaPool`): on the Color page it sits
+under the clip in the Media Pool, and any node takes it as a key (right-click
+the node > Add Matte), so the person can go over anything. The clip's entry
+carries `matte` (`asset_id`, `path`, `clip_matte: true`). Where Resolve will
+not attach it, the matte comes into the bin as its own clip (`clip_matte:
+false`, its `name`). A matte that cannot be downloaded never fails the import
+(`matte_error`).
 
 Result for media:
 

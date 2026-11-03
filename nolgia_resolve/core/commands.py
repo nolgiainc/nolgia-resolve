@@ -237,6 +237,9 @@ def validate(kind, args):
                                "in order), `project_id` (a NOLGIA project's media) or `color_preset` (a NOLGIA "
                                "color preset, for example kodak-portra-400).")
         out["append"] = _bool(args, "append")
+        # A green screen or keep-me result's matte comes in as the clip's own
+        # clip matte unless this is false.
+        out["with_matte"] = args.get("with_matte") is None or _bool(args, "with_matte")
         out["bin"] = _str(args, "bin")
         out["apply_to"] = _str(args, "apply_to", choices=LUT_TARGETS)
         out["node"] = _int(args, "node", 1, 999) or 1

@@ -878,6 +878,10 @@ class Ops:
                      "path": item["path"]}
             if already:
                 entry["already_in_bin"] = True
+            if item.get("matte"):
+                entry["matte"] = self.add_clip_matte(pool, folder, found[0], item["matte"])
+            elif item.get("matte_error"):
+                entry["matte_error"] = item["matte_error"]
             entries.append(entry)
             clips += found
         self.changed = True
@@ -893,11 +897,42 @@ class Ops:
             result["path"] = entries[0]["path"]
             if entries[0].get("already_in_bin"):
                 result["already_in_bin"] = True
+            for key in ("matte", "matte_error"):
+                if entries[0].get(key):
+                    result[key] = entries[0][key]
         if prepared.get("skipped"):
             result["skipped"] = prepared["skipped"]
         if args.get("append") and clips:
             result["appended"] = self.append(project, pool, clips)
         return result
+
+    def add_clip_matte(self, pool, folder, clip, matte):
+        """A green screen or keep-me render's matte as the clip's own clip
+        matte, the way Resolve keeps an external matte: on the Color page it
+        sits under the clip in the Media Pool, and any node takes it as a key
+        (right-click the node > Add Matte), so the person can go over
+        anything. Where Resolve will not attach it, the matte comes into the
+        bin as its own clip instead."""
+        out = {"asset_id": matte["asset_id"], "path": matte["path"]}
+        attached = call(pool, "GetClipMatteList", clip, default=[]) or []
+        if any(_same_path(p, matte["path"]) for p in attached):
+            out["clip_matte"] = True
+            out["already_attached"] = True
+            return out
+        storage = call(self.resolve, "GetMediaStorage")
+        if call(storage, "AddClipMattesToMediaPool", clip, [matte["path"]], default=False):
+            out["clip_matte"] = True
+            return out
+        try:
+            found, _ = self.import_file(pool, folder, matte["path"])
+            out["clip_matte"] = False
+            out["name"] = call(found[0], "GetName")
+            out["note"] = ("DaVinci Resolve did not attach it as the clip's matte, so it is in the bin as its "
+                           "own clip.")
+        except CommandError as err:
+            out["clip_matte"] = False
+            out["error"] = str(err)
+        return out
 
     def import_file(self, pool, folder, path):
         """Import one file into `folder`. Returns (clips, was_already_there)."""
@@ -1108,9 +1143,10 @@ def prepare_import(command, api, snapshot, log=lambda m: None):
     else:
         wanted = [(i, None) for i in (args.get("asset_ids") or [args["asset_id"]])]
     items = []
+    with_matte = args.get("with_matte") is not False
     try:
         for asset_id, asset in wanted:
-            items.append(_prepare_asset(asset_id, api, snapshot, asset))
+            items.append(_prepare_asset(asset_id, api, snapshot, asset, with_matte=with_matte))
     except BaseException:
         for item in items:
             if item.get("temp_dir"):
@@ -1171,7 +1207,7 @@ def _import_source(asset):
     return asset.get("signed_url"), asset.get("mime_type"), False
 
 
-def _prepare_asset(asset_id, api, snapshot, asset=None):
+def _prepare_asset(asset_id, api, snapshot, asset=None, with_matte=False):
     if not (asset or {}).get("signed_url"):
         try:
             asset = api.get_asset(asset_id)
@@ -1216,6 +1252,18 @@ def _prepare_asset(asset_id, api, snapshot, asset=None):
     item = {"kind": kind, "path": final, "ext": ext, "asset_id": asset_id}
     if compatible:
         item["compatible_copy"] = True
+    matte_id = asset.get("matte_layer_asset_id")
+    if with_matte and matte_id and kind == "video":
+        # A green screen or keep-me render names the matte its composite used
+        # (nolgia-api #1423: a grey MP4, white = the person). It comes down
+        # beside the clip; a matte that cannot never fails the import.
+        try:
+            matte = _prepare_asset(matte_id, api, snapshot)
+            if matte["kind"] != "video":
+                raise CommandError("the matte is not a video")
+            item["matte"] = {"asset_id": matte_id, "path": matte["path"]}
+        except (CommandError, ApiError, NetworkError, OSError) as err:
+            item["matte_error"] = "The clip came in, but its matte did not (%s)." % err
     return item
 
 
