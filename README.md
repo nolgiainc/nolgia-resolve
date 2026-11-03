@@ -424,8 +424,9 @@ matte. Since nolgia-api #1423 such a render names the matte its composite used
 it to the clip as its clip matte, so on the Color page any node takes it as a
 key (right-click the node > Add Matte). `with_matte: false` brings the clip in
 alone. Unit tests against the mock API, and an e2e check (tests/e2e_resolve.py)
-that reads the clip matte back with `GetClipMatteList`. RESOLVE_RUN_PLACEHOLDER
-Not yet on macOS.
+that reads the clip matte back with `GetClipMatteList`. Run in DaVinci Resolve
+Studio 21.1.1 on Windows 11 against the mock API (33 of 33 e2e checks):
+Resolve attached the matte and `GetClipMatteList` listed it. Not yet on macOS.
 
 0.3.3 (November 3, 2026): the cost line under the chat says what a turn
 typically costs on your model and the cap on a turn's own work ("about 120
