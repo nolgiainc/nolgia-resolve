@@ -376,12 +376,14 @@ class Caller:
         assert status == 200, status
         return data
 
-    def seed_asset(self, filename, content_type, data, project_id=None):
+    def seed_asset(self, filename, content_type, data, project_id=None, matte_layer=None):
         """A test file in the library, as a person's own asset would be."""
         if self.mock:
             url = "/mock/assets?" + urllib.parse.urlencode({"filename": filename, "content_type": content_type})
             if project_id:
                 url += "&project_id=" + project_id
+            if matte_layer:
+                url += "&matte_layer_asset_id=" + matte_layer
             status, asset = self.http("POST", url, data, auth=False)
             assert status == 201, asset
             return asset["id"]
@@ -896,6 +898,29 @@ def main():
             assert res["kind"] == "video" and res["imported"] == ["cut.mp4"], res
 
         checks.check("import_asset: the rendered video into the bin", import_video)
+
+        def import_matte():
+            # A green screen or keep-me result (nolgia-api #1423) names its
+            # matte; it rides on the clip as the clip's own clip matte.
+            clip = caller.asset_bytes(made["mp4"])
+            matte = caller.seed_asset("walk matte.mp4", "video/mp4", clip)
+            result = caller.seed_asset("walk.mp4", "video/mp4", clip, matte_layer=matte)
+            res = expect_ok(caller.command("import_asset", {"asset_id": result, "bin": "Keep me"}))
+            assert res["imported"] == ["walk.mp4"] and res["matte"]["asset_id"] == matte, res
+            assert res["matte"]["clip_matte"] is True, res
+            code = "\n".join([
+                "bin_ = [f for f in media_pool.GetRootFolder().GetSubFolderList() if f.GetName() == 'Keep me'][0]",
+                "clips = bin_.GetClipList()",
+                "result = {'clips': [c.GetName() for c in clips],",
+                "          'mattes': [media_pool.GetClipMatteList(c) for c in clips]}",
+            ])
+            value = expect_ok(caller.command("run", {"language": "python", "code": code}))["value"]
+            assert value["clips"] == ["walk.mp4"], value
+            assert len(value["mattes"][0]) == 1 and value["mattes"][0][0].lower().endswith("walk matte.mp4"), value
+            print("  Resolve lists the clip matte %r" % value["mattes"][0][0], flush=True)
+
+        if not prod:
+            checks.check("import_asset: a keep-me result's matte as the clip's clip matte", import_matte)
 
         def import_several_and_a_project():
             project = None if prod else "0d6c7a52-5f1e-4c55-9a52-0f6e4c3b2a10"

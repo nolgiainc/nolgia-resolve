@@ -82,6 +82,7 @@ class MediaPoolItem(PyRemoteObject):
         self.name = os.path.basename(path)
         self.kind = kind
         self.frames = frames
+        self.mattes = []  # clip mattes (MediaStorage.AddClipMattesToMediaPool)
 
     def GetName(self):
         return self.name
@@ -238,6 +239,9 @@ class MediaPool(PyRemoteObject):
         folder = Folder(name)
         parent.folders.append(folder)
         return folder
+
+    def GetClipMatteList(self, item):
+        return list(item.mattes)
 
     def ImportMedia(self, infos):
         self._log("ImportMedia", infos)
@@ -582,6 +586,18 @@ class ProjectManager(PyRemoteObject):
         return {"DbType": "Disk", "DbName": "Local Database"}
 
 
+class MediaStorage(PyRemoteObject):
+    def __init__(self):
+        self.attaches = True  # False: Resolve refuses the matte (answers False)
+
+    def AddClipMattesToMediaPool(self, item, paths, stereo_eye=None):
+        self._log("AddClipMattesToMediaPool", item.name, list(paths))
+        if not self.attaches or not all(os.path.isfile(p) for p in paths):
+            return False
+        item.mattes += [p for p in paths if p not in item.mattes]
+        return True
+
+
 class Resolve(PyRemoteObject):
     def __init__(self):
         self.pm = ProjectManager()
@@ -589,9 +605,13 @@ class Resolve(PyRemoteObject):
         self.page = "edit"
         self.alive = True
         self.color_shown = False  # a fresh session: the Color page has not been shown yet
+        self.storage = MediaStorage()
 
     def GetProjectManager(self):
         return self.pm if self.alive else None
+
+    def GetMediaStorage(self):
+        return self.storage
 
     def GetVersionString(self):
         return "21.1.1.7" if self.alive else None

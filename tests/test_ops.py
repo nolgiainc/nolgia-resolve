@@ -419,6 +419,38 @@ class ImportMedia(Base):
         self.assertTrue(again["assets"][0]["already_in_bin"])
         self.assertEqual(bins.count("NOLGIA imports"), 1)
 
+    def test_a_keep_me_result_brings_its_matte_as_the_clips_clip_matte(self):
+        # nolgia-api #1423: a green screen or keep-me render names the grey
+        # matte its composite used; it rides on the clip as a clip matte.
+        clip, matte = self.media("walk.mp4"), self.media("walk matte.mp4")
+        prepared = {"items": [{"kind": "video", "path": clip, "asset_id": "r1",
+                               "matte": {"asset_id": "m1", "path": matte}}]}
+        res = self.do("import_asset", {"asset_id": "r1"}, prepared)
+        self.assertEqual(res["matte"], {"asset_id": "m1", "path": matte, "clip_matte": True})
+        item = [c for c in self.project.pool.root.folders if c.name == "NOLGIA imports"][0].clips
+        self.assertEqual([c.name for c in item], ["walk.mp4"], "the matte is not a clip of its own")
+        self.assertEqual(item[0].mattes, [matte])
+        again = self.do("import_asset", {"asset_id": "r1"}, prepared)
+        self.assertTrue(again["matte"]["already_attached"])
+        self.assertEqual(item[0].mattes, [matte])
+
+    def test_a_matte_resolve_will_not_attach_comes_into_the_bin(self):
+        self.resolve.storage.attaches = False
+        clip, matte = self.media("walk.mp4"), self.media("walk matte.mp4")
+        res = self.do("import_asset", {"asset_id": "r1"}, {"items": [
+            {"kind": "video", "path": clip, "asset_id": "r1", "matte": {"asset_id": "m1", "path": matte}}]})
+        self.assertFalse(res["matte"]["clip_matte"])
+        self.assertEqual(res["matte"]["name"], "walk matte.mp4")
+        self.assertEqual(res["imported"], ["walk.mp4"])
+        bin_ = [c for c in self.project.pool.root.folders if c.name == "NOLGIA imports"][0]
+        self.assertEqual([c.name for c in bin_.clips], ["walk.mp4", "walk matte.mp4"])
+
+    def test_a_matte_that_did_not_download_is_said_not_failed(self):
+        res = self.do("import_asset", {"asset_id": "r1"}, {"items": [
+            {"kind": "video", "path": self.media("walk.mp4"), "asset_id": "r1", "matte_error": "The clip came in, but its matte did not (x)."}]})
+        self.assertEqual(res["imported"], ["walk.mp4"])
+        self.assertIn("matte did not", res["matte_error"])
+
     def test_import_puts_the_pool_back_on_the_root_when_no_folder_was_current(self):
         # Resolve 21.1.1 answers None for GetCurrentFolder right after CreateProject.
         self.project.pool.current = None
@@ -602,6 +634,27 @@ class PrepareImport(unittest.TestCase):
         self.assertEqual(item["kind"], "video")
         self.assertEqual(item["path"], os.path.join(self.tmp, "imports", "My_ Film", "a-1", "clip.mp4"))
         self.assertTrue(os.path.isfile(item["path"]))
+
+    def test_a_keep_me_result_downloads_its_matte_too(self):
+        mp4 = b"\x00\x00\x00\x18ftypisom"
+        assets = {"r1": {"signed_url": "result", "display_name": "Walk", "mime_type": "video/mp4",
+                         "matte_layer_asset_id": "m1"},
+                  "m1": {"signed_url": "matte", "display_name": "Walk matte", "mime_type": "video/mp4"}}
+        api = self.api({}, lambda url: mp4 + url.encode())
+        api.get_asset = lambda asset_id: dict(assets[asset_id], id=asset_id)
+        item = ops_module.prepare_import(command("import_asset", {"asset_id": "r1"}), api, {})["items"][0]
+        self.assertEqual(item["matte"]["asset_id"], "m1")
+        with open(item["matte"]["path"], "rb") as handle:
+            self.assertTrue(handle.read().endswith(b"matte"))
+        alone = ops_module.prepare_import(command("import_asset", {"asset_id": "r1", "with_matte": False}), api, {})
+        self.assertNotIn("matte", alone["items"][0])
+        assets["m1"]["mime_type"] = "image/png"
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+        api = self.api({}, lambda url: png if url == "matte" else mp4 + url.encode())
+        api.get_asset = lambda asset_id: dict(assets[asset_id], id=asset_id)
+        broken = ops_module.prepare_import(command("import_asset", {"asset_id": "r1"}), api, {})["items"][0]
+        self.assertNotIn("matte", broken)
+        self.assertIn("matte did not", broken["matte_error"])
 
     def test_a_444_original_comes_in_as_its_h264_copy(self):
         # Since nolgia-api #1363 signed_url is the model's original. A 4:4:4

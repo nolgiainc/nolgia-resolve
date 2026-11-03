@@ -284,6 +284,7 @@ class MockState:
             "status": a["status"],
             "favorite": False,
             "projects": [{"id": pid} for pid in a.get("project_ids", [])],
+            **({"matte_layer_asset_id": a["matte_layer_asset_id"]} if a.get("matte_layer_asset_id") else {}),
         }
 
     def new_asset(self, user_id, filename, content_type, size_bytes, display_name=None, tags=None, data=None):
@@ -1164,6 +1165,9 @@ def mock_create_asset(h):
                              [], h.raw_body)
         if h.query.get("project_id"):
             asset["project_ids"].append(h.query["project_id"].lower())
+        if h.query.get("matte_layer_asset_id"):
+            # a green screen or keep-me render's result names its matte layer
+            asset["matte_layer_asset_id"] = h.query["matte_layer_asset_id"]
         view = st.asset_view(asset, h.host)
     return h._send(201, view)
 
