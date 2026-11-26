@@ -230,6 +230,7 @@ costs no NOLGIA credits.
 | `contrast`, `saturation` | Primaries Contrast (pivot at DaVinci Intermediate mid grey, 0.336) and Saturation; 1 is none |
 | `skin` | the skin line node (default true) |
 | `neutral_hero` | also take the hero's white to neutral |
+| `trust_white` | clip numbers `[3]` whose own white the correction uses even when it is far from the others' (see "Left as shot" below) |
 | `frames` | frames measured per clip, 1 to 5 (default 3) |
 
 `apply` and `look` change clips, so they wait in the NOLGIA window for the
@@ -259,6 +260,19 @@ skin when the two agree within half a stop. A second measurement after the
 first pass corrects what is left. In a colour managed or ACES project CST IN
 and CST OUT are left to Resolve and nothing is measured; the look is the
 project's working space version.
+
+**Left as shot.** The correction makes a colour move on its own only up to 0.6
+stops between two channels, which covers a camera's white balance drifting
+between shots of one scene. Past that the "white" it measured is as likely the
+scene's own colour as a camera's mistake (the ground in late sun, a close-up
+with nothing white or grey in it), no measurement tells the two apart, and a
+move made on the wrong guess paints the shot. Such a clip keeps its colour and
+its exposure (a matched clip still takes the hero's own correction), still gets
+the eight nodes, and is named: `left_as_shot` on the clip (`gap_stops`, `from`,
+`would_have_moved_stops`) and `left_as_shot` on the answer (`clips`, and `say`,
+a sentence for the person). The person balances it by eye on 02 BALANCE and 03
+EXPOSURE; or, when the palest bright thing in the shot really is white or
+grey, `trust_white` with the clip's number corrects it as measured.
 
 Result: `{project, timeline, color_science, hero, look, strength, lut_folder,
 seconds, cost, clips: [{clip, name, camera, camera_found_by, version,

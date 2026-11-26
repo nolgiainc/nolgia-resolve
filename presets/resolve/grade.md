@@ -50,6 +50,14 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
    ask which camera and send it again with `camera`.
 4. The after still at the same frame. Say in two lines what moved, and give
    the per clip `balance_stops` and `exposure_stops`.
+5. If the answer has `left_as_shot`, say which clips and why in its own words
+   (`say`): the plugin leaves a shot alone when it cannot tell a camera's
+   mistake from the scene's own colour, as a colourist would before guessing.
+   Show that clip's still and ask: is the palest bright thing in it really
+   white or grey (a shirt, paper, a wall)? If yes, send `apply` again for that
+   clip with `trust_white`; if no, tell them it is theirs to set by eye on the
+   BALANCE and EXPOSURE nodes against the hero, and offer to nudge it with
+   them, a tenth of a stop at a time.
 
 ## Change it
 
