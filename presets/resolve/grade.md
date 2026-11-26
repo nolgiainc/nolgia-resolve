@@ -23,8 +23,11 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
 
 1. Which clips: every clip on the timeline (default), the selected ones, or
    clip numbers as the Color page numbers them.
-2. The hero clip to match to, if any. Offer the best exposed clip with skin in
-   the scene's main light, from its still.
+2. The hero clip to match to, if any. Offer a wide or establishing shot of
+   the scene, well exposed, from its still: a wide shows the scene's light,
+   its shadows and something white or grey, which is what the other shots are
+   matched on. Never offer an insert or a close-up as the hero; it shares too
+   little with the rest.
 3. The look and its strength. Offer two or three from the library by name,
    with one line each from its description (`grade` with `action: "looks"`);
    default strength 100%, or what the person said ("60%"). When they name a
