@@ -418,6 +418,23 @@ the project since it was last saved.
 
 ## Tested on
 
+0.3.5 (November 27, 2026): the grade leaves a shot as it was shot when its
+white is too far off to trust. `grade` `apply` makes a colour move on its own
+measurement only up to 0.6 stops between two channels, which covers a camera's
+white balance drifting between the shots of one scene. Past that the clip
+keeps its colour and its exposure (a matched clip still takes the hero's own
+correction), still gets the eight nodes, and is named: `left_as_shot` on the
+clip and on the answer, with a sentence for the person. `trust_white` with the
+clip's number corrects it as measured when the palest bright thing in it
+really is white or grey. Before, a close-up with nothing white or grey in it
+was moved as far as the measurement said (on the scene below a move 0.88
+stops wide, which turned the shot blue). The Grade workflow's text now offers a wide shot as the hero, never an
+insert. Unit tests (four new in tests/test_grading.py) on Python 3.9 and 3.14,
+and the engine's own measurement and correction run outside Resolve on stills
+of a real three-shot Sony S-Log3 scene: two shots corrected as before, the
+third left as shot. The node build did not change; this release was not yet
+run in DaVinci Resolve when it was tagged, and not on macOS.
+
 0.3.4 (November 3, 2026): a green screen or keep-me result comes in with its
 matte. Since nolgia-api #1423 such a render names the matte its composite used
 (a grey MP4, white = the person); `import_asset` downloads it too and attaches
