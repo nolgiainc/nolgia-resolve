@@ -16,7 +16,7 @@ concurrency:
 jobs:
   tests:
     name: Unit tests (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # ubuntu-latest (26.04) no longer offers Python 3.9, the oldest the plugin is tested on
     timeout-minutes: 15
     strategy:
       fail-fast: false

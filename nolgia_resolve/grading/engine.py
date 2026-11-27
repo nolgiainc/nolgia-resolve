@@ -45,6 +45,12 @@ VERSION_PREFIX = "NOLGIA grade"
 PIVOT_DI = 0.336
 MAX_BALANCE_STOPS = 1.5
 MAX_EXPOSURE_STOPS = 2.0
+# The widest gap between two channels, in stops, of a colour move the correction makes on its own. A camera's white
+# balance drifting between two shots of one scene sits under it. Past it the "white" (the least saturated bright
+# pixels) is as likely the scene's own colour as a camera's mistake: the ground in late sun, a close-up with nothing
+# white in it. No measurement tells those two apart, and a move made on the wrong guess paints the shot, so the shot is
+# left as it was shot and named for the person, who can say it is a white with `trust_white`.
+BALANCE_TRUST_STOPS = 0.6
 
 
 def call(obj, method, *args, **kw):
@@ -149,6 +155,12 @@ def validate_args(args):
     out["saturation"] = _number(args, "saturation", 0.0, 2.0, 1.0)
     out["skin"] = bool(args.get("skin", True))
     out["neutral_hero"] = bool(args.get("neutral_hero", False))
+    trust = args.get("trust_white") or []
+    if (not isinstance(trust, (list, tuple)) or len(trust) > 500
+            or not all(isinstance(c, int) and not isinstance(c, bool) and c >= 1 for c in trust)):
+        raise CommandError("`trust_white` is a list of clip numbers whose own white the correction uses even when it "
+                           "is far from the others' (1 is the first clip on the timeline).")
+    out["trust_white"] = list(trust)
     frames = _number(args, "frames", 1, 5, 3)
     out["frames"] = int(frames)
     if action == "look" and out["look"] is None and not out["lut"]:
@@ -176,6 +188,12 @@ def describe(args, caller="NOLGIA Agent"):
                              % args["match"])
             else:
                 lines.append("Correction: white balance and exposure measured from each clip.")
+            lines.append("A clip whose white is too far off to trust is left as it was shot and named, for you to "
+                         "balance by eye.")
+            if args.get("trust_white"):
+                lines.append("Clip%s %s: balanced on its own white however far off it is, as asked."
+                             % ("" if len(args["trust_white"]) == 1 else "s",
+                                ", ".join(str(c) for c in args["trust_white"])))
         if args["contrast"] != 1.0 or args["saturation"] != 1.0:
             lines.append("Contrast %.2f, saturation %.2f." % (args["contrast"], args["saturation"]))
     if args["look"] and args["look"] != "none":
@@ -574,7 +592,9 @@ class Grader(object):
                 results[n]["balance_stops"] = [round(b, 3) for b in bal]
                 results[n]["exposure_stops"] = round(exp, 3)
                 if matched_on:
-                    results[n]["matched_on"] = matched_on
+                    results[n]["matched_on"] = {k: v for k, v in matched_on.items() if k != "left_as_shot"}
+                    if matched_on.get("left_as_shot"):
+                        results[n]["left_as_shot"] = matched_on["left_as_shot"]
                 if n in stats and stats[n].get("ok"):
                     st = stats[n]
                     results[n]["measured"] = {"white_cast_stops": [round(c, 3) for c in M.cast_stops(st["white"])],
@@ -599,6 +619,20 @@ class Grader(object):
                "look": args["look"], "strength": args["strength"] if (args["look"] not in (None, "none") or args.get("lut")) else None,
                "lut": _lut_brief(self.lut_used) if getattr(self, "lut_used", None) else None,
                "lut_folder": os.path.join(root, library.SUBFOLDER), "cost": "free: it ran in DaVinci Resolve"}
+        left = [results[n] for n, _ in clips if results[n].get("left_as_shot")]
+        if left:
+            against = (" against clip %d" % args["match"]) if args["match"] else ""
+            out["left_as_shot"] = {
+                "clips": [r["clip"] for r in left],
+                "say": "%s left as shot: %s. The plugin cannot tell a camera's mistake from the scene's own colour "
+                       "at that distance (the ground in late sun, a close-up with nothing white in it), and a wrong "
+                       "guess paints the shot. Balance %s by eye%s on the 02 BALANCE and 03 EXPOSURE nodes; or, if "
+                       "the palest bright thing in the shot really is white or grey, run again with trust_white: %s."
+                       % ("Clip %d was" % left[0]["clip"] if len(left) == 1
+                          else "Clips %s were" % ", ".join(str(r["clip"]) for r in left),
+                          "; ".join("clip %d's white is %.2f stops from %s" % (
+                              r["clip"], r["left_as_shot"]["gap_stops"], r["left_as_shot"]["from"]) for r in left),
+                          "it" if len(left) == 1 else "them", against, [r["clip"] for r in left])}
         if science == "rcm":
             space = str(call(project, "GetSetting", "colorSpaceTimeline", default="") or "")
             if space and "DaVinci WG" not in space and "DaVinci Wide Gamut" not in space:
@@ -618,7 +652,12 @@ class Grader(object):
         Colour: the clip's white (the least saturated bright pixels) and its skin (found after the white's cast is
         taken out, so a cast cannot change which pixels count), averaged when both are there. Exposure: the median
         of what white, skin and key each say, so one of them caught out by the framing cannot decide alone.
-        Matching takes each clip's colour and level to the hero's; the hero keeps its own unless neutral_hero."""
+        Matching takes each clip's colour and level to the hero's; the hero keeps its own unless neutral_hero.
+
+        A colour move wider than BALANCE_TRUST_STOPS is not made (see the constant): that clip is left as it was
+        shot, with "left_as_shot" in its third value saying how far off its white is and what the move would have
+        been. Its level is left too, since its skin was found after taking that same "cast" out. A clip named in
+        `trust_white` is corrected whatever the gap."""
         good = {n: s for n, s in stats.items() if s.get("ok")}
         hero = args["match"] if args["match"] in good else None
         mode = args["exposure"]
@@ -638,12 +677,15 @@ class Grader(object):
                 out["skin"] = math.log2(max(s["skin_y"], 1e-6))
             return out
 
-        out = {}
-        if hero:
-            h = good[hero]
-            hero_bal = M.cast_stops(h["white"]) if args["neutral_hero"] else [0.0, 0.0, 0.0]
-        whites = sorted(levels(s)["white"] for s in good.values())
-        median_white = whites[len(whites) // 2] if whites else 0.0
+        trusted = set(args.get("trust_white") or ())
+        gap = lambda move: max(move) - min(move)
+        far = lambda n, move: gap(move) > BALANCE_TRUST_STOPS and n not in trusted
+        zero = [0.0, 0.0, 0.0]
+        hero_bal = zero
+        if hero and args["neutral_hero"] and not far(hero, M.cast_stops(good[hero]["white"])):
+            hero_bal = M.cast_stops(good[hero]["white"])
+        # Colour first: each clip's own move, and whether it is one the correction makes on its own.
+        colour = {}
         for n, _ in clips:
             s = good.get(n)
             if s is None:
@@ -651,12 +693,36 @@ class Grader(object):
             if hero and n != hero:
                 mine, theirs = casts(s), casts(good[hero])
                 keys = [k for k in ("white", "skin") if k in mine and k in theirs]
-                bal = [sum(mine[k][c] - theirs[k][c] for k in keys) / len(keys) + hero_bal[c] for c in range(3)]
-                on = "+".join(keys)
+                move = [sum(mine[k][c] - theirs[k][c] for k in keys) / len(keys) for c in range(3)]
+                on, to = "+".join(keys), "clip %s's" % hero
             elif hero:
-                bal, on = hero_bal, "hero (kept)" if not args["neutral_hero"] else "hero (white made neutral)"
+                move = M.cast_stops(s["white"]) if args["neutral_hero"] else zero
+                on, to = "hero (white made neutral)" if args["neutral_hero"] else "hero (kept)", "neutral"
             else:
-                bal, on = M.cast_stops(s["white"]), "white"
+                move, on, to = M.cast_stops(s["white"]), "white", "neutral"
+            if far(n, move):
+                colour[n] = (None, on, {"gap_stops": round(gap(move), 2), "from": to,
+                                        "would_have_moved_stops": [round(m, 3) for m in move]})
+            else:
+                colour[n] = (move, on, None)
+        whites = sorted(levels(good[n])["white"] for n in colour if colour[n][0] is not None)
+        median_white = whites[len(whites) // 2] if whites else 0.0
+        out = {}
+        for n, _ in clips:
+            if n not in colour:
+                continue
+            s = good[n]
+            move, on, left = colour[n]
+            if left:
+                # Nothing of its own is believed, so nothing of its own is moved; a matched clip still takes the
+                # hero's correction (the same camera and light).
+                keep = "kept: its white is %.2f stops from %s, too far to trust; set it by eye" % (
+                    left["gap_stops"], left["from"])
+                bal = hero_bal if (hero and n != hero) else zero
+                out[n] = ([clamp(b, MAX_BALANCE_STOPS) for b in bal], 0.0,
+                          {"colour": keep, "exposure": "kept: set it by eye", "left_as_shot": left})
+                continue
+            bal = [move[c] + hero_bal[c] for c in range(3)] if (hero and n != hero) else move
             bal = [clamp(b, MAX_BALANCE_STOPS) for b in bal]
             if mode == "keep" or (hero and n == hero):
                 exp, lon = 0.0, "kept"
@@ -714,7 +780,11 @@ class Grader(object):
         for n, item in clips:
             if n not in target or n not in corrections:
                 continue
+            if corrections[n][2].get("left_as_shot"):
+                continue  # nothing of its own was moved, so there is nothing of its own left to correct
             residual_bal, residual_exp, _ = target[n]
+            if target[n][2].get("left_as_shot"):
+                continue
             if not (hero and args["exposure"] in ("auto", "match")):
                 residual_exp = 0.0  # "even" and "keep" set exposure once; only a match has a target to settle on
             if hero and n == hero:

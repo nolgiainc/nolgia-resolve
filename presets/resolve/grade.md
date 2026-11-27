@@ -23,8 +23,11 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
 
 1. Which clips: every clip on the timeline (default), the selected ones, or
    clip numbers as the Color page numbers them.
-2. The hero clip to match to, if any. Offer the best exposed clip with skin in
-   the scene's main light, from its still.
+2. The hero clip to match to, if any. Offer a wide or establishing shot of
+   the scene, well exposed, from its still: a wide shows the scene's light,
+   its shadows and something white or grey, which is what the other shots are
+   matched on. Never offer an insert or a close-up as the hero; it shares too
+   little with the rest.
 3. The look and its strength. Offer two or three from the library by name,
    with one line each from its description (`grade` with `action: "looks"`);
    default strength 100%, or what the person said ("60%"). When they name a
@@ -50,6 +53,14 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
    ask which camera and send it again with `camera`.
 4. The after still at the same frame. Say in two lines what moved, and give
    the per clip `balance_stops` and `exposure_stops`.
+5. If the answer has `left_as_shot`, say which clips and why in its own words
+   (`say`): the plugin leaves a shot alone when it cannot tell a camera's
+   mistake from the scene's own colour, as a colourist would before guessing.
+   Show that clip's still and ask: is the palest bright thing in it really
+   white or grey (a shirt, paper, a wall)? If yes, send `apply` again for that
+   clip with `trust_white`; if no, tell them it is theirs to set by eye on the
+   BALANCE and EXPOSURE nodes against the hero, and offer to nudge it with
+   them, a tenth of a stop at a time.
 
 ## Change it
 

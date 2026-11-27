@@ -295,7 +295,8 @@ class ArgsTest(unittest.TestCase):
 
     def test_refusals(self):
         for bad in ({"action": "paint"}, {"look": "Kodak 2383"}, {"strength": 300}, {"clips": [0]}, {"match": "3"},
-                    {"camera": "red"}, {"action": "look"}, {"contrast": 5}):
+                    {"camera": "red"}, {"action": "look"}, {"contrast": 5}, {"trust_white": "all"},
+                    {"trust_white": [0]}):
             with self.assertRaises(CommandError, msg=bad):
                 engine.validate_args(bad)
 
@@ -306,6 +307,10 @@ class ArgsTest(unittest.TestCase):
         self.assertIn("Kodak 2383 print, warm timing (NOLGIA) at 60%", text)
         self.assertIn("no NOLGIA credits", text)
         self.assertIn("Versions menu", text)
+        self.assertIn("left as it was shot", text)
+        self.assertNotIn("however far off", text)
+        said = " ".join(engine.describe(engine.validate_args({"match": 3, "trust_white": [4]}))[1])
+        self.assertIn("Clip 4: balanced on its own white however far off it is", said)
 
     def test_camera_words(self):
         self.assertEqual(engine.camera_from_text("A001_C002_SLOG3.MXF"), "slog3")
@@ -519,6 +524,74 @@ class GraderTest(unittest.TestCase):
         self.assertTrue(os.path.isfile(os.path.join(self.root, "NOLGIA Grade", "Looks", "Print",
                                                     "Kodak 2383 print warm timing NOLGIA.cube")))
         self.assertEqual(result["cost"], "free: it ran in DaVinci Resolve")
+
+    # A fourth clip whose "white" is 1.1 stops off (red against blue) and 1.2 stops under: a camera set badly wrong, or
+    # a shot with nothing white in it. The measurement is the same for both, so the correction does not guess.
+    FAR = ((1.5, 1.0, 0.7), -1.2)
+
+    def with_a_far_clip(self):
+        self.items.append(FakeItem("D_SLOG3.mov", 144, 192, *self.FAR))
+        self.ops = FakeOps(self.root, self.items)
+
+    def test_a_white_too_far_to_trust_is_left_as_shot(self):
+        self.with_a_far_clip()
+        result = engine.Grader(self.ops).run(engine.validate_args({"match": 3}))
+        clips = {c["clip"]: c for c in result["clips"]}
+        far = clips[4]
+        self.assertEqual((far["balance_stops"], far["exposure_stops"]), ([0.0, 0.0, 0.0], 0.0))
+        self.assertAlmostEqual(far["left_as_shot"]["gap_stops"], math.log2(1.5 / 0.7), delta=0.05)
+        self.assertEqual(far["left_as_shot"]["from"], "clip 3's")
+        self.assertTrue(far["matched_on"]["colour"].startswith("kept: its white is"))
+        self.assertTrue(far["matched_on"]["exposure"].startswith("kept"))
+        self.assertNotIn("second_pass", far)
+        self.assertNotIn("residual_after_first_pass", far)
+        # It still has the labelled nodes, at rest, for the person to set by eye.
+        self.assertEqual([n["label"] for n in self.items[3].nodes], list(engine.LABELS))
+        self.assertEqual(result["left_as_shot"]["clips"], [4])
+        self.assertIn("Clip 4 was left as shot", result["left_as_shot"]["say"])
+        self.assertIn("trust_white: [4]", result["left_as_shot"]["say"])
+        # The others are corrected as before.
+        for n, (gains, stops) in ((1, ((0.86, 1.0, 1.18), -0.8)), (2, ((1.0, 1.12, 0.97), 0.5))):
+            logs = [-math.log2(g) for g in gains]
+            mean = sum(logs) / 3
+            for got, want in zip(clips[n]["balance_stops"], [l - mean for l in logs]):
+                self.assertAlmostEqual(got, want, delta=0.03, msg=n)
+            self.assertAlmostEqual(clips[n]["exposure_stops"], -stops + mean, delta=0.06, msg=n)
+            self.assertNotIn("left_as_shot", clips[n])
+
+    def test_trust_white_corrects_it_all_the_same(self):
+        self.with_a_far_clip()
+        result = engine.Grader(self.ops).run(engine.validate_args({"match": 3, "trust_white": [4]}))
+        far = {c["clip"]: c for c in result["clips"]}[4]
+        gains, stops = self.FAR
+        logs = [-math.log2(g) for g in gains]
+        mean = sum(logs) / 3
+        for got, want in zip(far["balance_stops"], [l - mean for l in logs]):
+            self.assertAlmostEqual(got, want, delta=0.03)
+        self.assertAlmostEqual(far["exposure_stops"], -stops + mean, delta=0.06)
+        self.assertNotIn("left_as_shot", far)
+        self.assertNotIn("left_as_shot", result)
+
+    def test_with_no_hero_a_far_white_is_not_made_neutral(self):
+        self.with_a_far_clip()
+        result = engine.Grader(self.ops).run(engine.validate_args({}))
+        clips = {c["clip"]: c for c in result["clips"]}
+        self.assertEqual(clips[4]["balance_stops"], [0.0, 0.0, 0.0])
+        self.assertEqual(clips[4]["left_as_shot"]["from"], "neutral")
+        self.assertEqual(result["left_as_shot"]["clips"], [4])
+        self.assertNotIn(" against clip", result["left_as_shot"]["say"])
+        self.assertNotEqual(clips[1]["balance_stops"], [0.0, 0.0, 0.0])  # an ordinary cast is still taken out
+
+    def test_a_far_hero_is_not_made_neutral(self):
+        self.with_a_far_clip()
+        result = engine.Grader(self.ops).run(engine.validate_args({"clips": [3, 4], "match": 4, "neutral_hero": True}))
+        clips = {c["clip"]: c for c in result["clips"]}
+        self.assertEqual(clips[4]["balance_stops"], [0.0, 0.0, 0.0])
+        self.assertEqual(clips[4]["left_as_shot"]["from"], "neutral")
+        # ... and nothing is matched to a white that far away either.
+        self.assertEqual(clips[3]["balance_stops"], [0.0, 0.0, 0.0])
+        self.assertEqual(clips[3]["left_as_shot"]["from"], "clip 4's")
+        self.assertEqual(result["left_as_shot"]["clips"], [3, 4])
 
     def test_a_second_grade_keeps_the_first(self):
         engine.Grader(self.ops).run(engine.validate_args({"clips": [3], "correct": False}))
