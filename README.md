@@ -432,8 +432,12 @@ toward blue and two stops brighter). The Grade workflow's text now offers a
 wide shot as the hero, never an insert. Unit tests (four new in tests/test_grading.py) on Python 3.9 and 3.14,
 and the engine's own measurement and correction run outside Resolve on stills
 of a real three-shot Sony S-Log3 scene: two shots corrected as before, the
-third left as shot. The node build did not change; this release was not yet
-run in DaVinci Resolve when it was tagged, and not on macOS.
+third left as shot. The node build did not change. Run in DaVinci Resolve
+Studio 21.1.1 on Windows 11 after the tag, on that scene's S-Log3 clip with
+the Kodak 2383 print look: `grade` `apply` corrected and matched two shots
+and left the third as shot (its white 0.91 stops from the hero's), each clip
+with its eight nodes in a `NOLGIA grade` version; switching the LOOK node
+off and on gave back the identical still. Not yet on macOS.
 
 0.3.4 (November 3, 2026): a green screen or keep-me result comes in with its
 matte. Since nolgia-api #1423 such a render names the matte its composite used

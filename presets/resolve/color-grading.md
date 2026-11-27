@@ -5,178 +5,168 @@ category: Film assistant
 app: resolve
 min_app_version: "21.1"
 beta: true
-starter_prompt: "Use NOLGIA to grade the timeline open in DaVinci Resolve with a NOLGIA film stock: suggest stocks that suit my footage, show me before and after stills from the same frame, keep my own grade untouched, and let me try another stock."
+starter_prompt: "Use NOLGIA to grade the timeline open in DaVinci Resolve: convert the camera log, correct every clip, match them to the shot I pick, then add a film look from NOLGIA's library at the strength I choose. Show me before and after stills from the same frame and keep my own grade in each clip's versions."
 ---
 
 # Grade a timeline in DaVinci Resolve
 
-Give the clips on the person's timeline the look of a real film stock: a
-NOLGIA film stock LUT installed in their Resolve, applied in a place of its
-own so their own grade stays exactly as it was, with a before and an after
-still from the same frame to judge it by. The stock can be swapped, switched
-off or dialled back by the person at any time.
+Grade the clips on the person's timeline in the order a colorist works: the
+camera's log converted first, white balance and exposure corrected on every
+clip from its own frames, the clips of a scene matched to one hero shot, and
+only then a film look at a strength. One tool does all of it,
+`nolgia_app_grade` (NOLGIA for DaVinci Resolve 0.3.0 and newer). It lands as
+eight labelled nodes in a new color version of each clip, named
+`NOLGIA grade` (01 CST IN, 02 BALANCE, 03 EXPOSURE, 04 CONTRAST, 05 SAT,
+06 SKIN, 07 LOOK, 08 CST OUT), so the person keeps working on it by hand and
+their own grade stays in the clip's Versions menu. The look can be swapped,
+turned down or switched off at any time. The grading costs no NOLGIA credits.
+
+Do not do this job by hand with `nolgia_app_run` (a film stock LUT set on an
+empty node with `SetLUT`). One LUT that converts the log and adds the look in
+the same node leaves no place to correct or match a shot before the look, and
+a correction made after it works on a finished picture. Those were this
+workflow's steps before the plugin had `grade`; `nolgia_app_grade` replaces
+them.
 
 ## Ask
 
-1. Which clips get the stock: every clip on the current timeline (default),
-   the clips selected in the timeline, the clip under the playhead, or one
-   video track.
-2. The look they are after: a few words ("warm and soft", "clean daylight",
-   "night, tungsten"), a film or a reference image, or your suggestion. Look
-   at a still first (see below) and propose two or three stocks that suit the
-   footage, by their real names, with one line each on why. (Default: your
-   first suggestion.)
-3. Where the stock may live. The default is an empty node at the end of each
-   clip's grade (an ungraded clip has exactly one, so nothing of theirs
-   changes). When the timeline's own node graph already has an empty node
-   (the person added one on the Color page; a fresh timeline graph has none
-   and the API cannot add one), the stock can go there once for every clip.
-   The other way is a new local color version of each clip named after the
-   stock, so their own version stays as it was. (Default: an empty node on
-   each clip; the timeline graph when it has one; a new version when a clip
-   has no empty node.)
-4. Whether the footage is camera log: flat, grey and washed out on the
-   timeline because the camera recorded Sony S-Log3, ARRI LogC3, Panasonic
-   V-Log or Blackmagic Film. Read the clip metadata first (step 1) and look at
-   the before still; ask only when neither settles it. (Default: what the
-   metadata and the still say; plain Rec.709 when it is a normal picture.)
+1. Which clips: every clip on the current timeline (default), the clips
+   selected in the timeline, the clip under the playhead, or clip numbers as
+   the Color page numbers them (1 is the first clip in timeline order).
+2. The hero clip to match the others to, if any. Offer a wide or establishing
+   shot of the scene, well exposed, from its still: a wide shows the scene's
+   light, its shadows and something white or grey, which is what the other
+   shots are matched on. Never offer an insert or a close-up as the hero; it
+   shares too little with the rest. A timeline that holds more than one scene
+   is graded scene by scene, each with its own hero (see Build, step 4).
+   (Default: the wide you suggest when the clips are one scene; no hero, each
+   clip corrected on its own, when they are not.)
+3. The look and its strength. Offer two or three from NOLGIA's film look
+   library by their names, with one line each from its description
+   (`nolgia_app_grade` with `action: "looks"`); the default strength is full
+   (100%), or what the person said ("60%", "a bit less"). When they name a LUT
+   they already have (DaVinci Resolve's own Kodak 2383 or Fujifilm 3513DI
+   Film Looks, a camera maker's LUT, their own show LUT), use it instead:
+   `lut` with its id, name or path from `installed_with_resolve` or
+   `your_luts` (plugin 0.3.1 and newer), and `folders` when it lives in a
+   folder NOLGIA does not list yet. A maker's free LUT they do not have yet:
+   give them its page from `official_free_luts`; NOLGIA never downloads or
+   ships it.
+4. Only when the inspect (Build, step 1) cannot tell: which camera the clips
+   were recorded with (Sony S-Log3, ARRI LogC3 or LogC4, Panasonic V-Log,
+   Canon Log 2 or 3, Blackmagic Film, Apple Log, Fujifilm F-Log, DJI D-Log,
+   Nikon N-Log, or a normal picture that is not log).
 
 ## Build
 
-1. **Read the timeline and the grades.** One `nolgia_app_run` that lists the
-   clips in scope (track, name, first and last frame, duration, `FPS` and
-   `Resolution` from `GetMediaPoolItem().GetClipProperty()`) and, for each,
-   its grade: `item.GetNodeGraph()`, `GetNumNodes()`, and per node
-   `GetNodeLabel(i)`, `GetToolsInNode(i)` and `GetLUT(i)`, plus
-   `item.GetCurrentVersion()`. Read the camera facts too: the clip properties
-   `Gamma Notes`, `Color Space Notes`, `Camera Type`, `Camera Manufacturer`
-   and `Input Color Space` (any may be empty), and the project setting
-   `colorScienceMode` (`project.GetSetting("colorScienceMode")`). Read the timeline's own graph the same way
-   (`timeline.GetNodeGraph()`). Keep this list: at the end you compare against
-   it. Say in one line what is already graded (a clip with a LUT or an
-   output transform means the stock will stack on top; say so).
-2. **The before still.** Pick a frame that shows skin or the main subject in
-   good light, in the middle of a clip (frame counts from 0 at the start of
-   the timeline), and call `nolgia_app_preview` with that `frame`. Remember
-   the frame number: the after still is taken from the same one.
-3. **Propose stocks.** From the still and the clip facts (daylight or
-   tungsten, how much contrast there is, how saturated it is, whether skin is
-   in the frame), name two or three stocks with their real names and
-   descriptions, read from `nolgia_list_color_presets`. Log footage changes
-   which LUT you install, not which stock you suggest (step 4). These are
-   NOLGIA's film stocks:
+1. **Check the plugin and read the timeline.** `nolgia_app_status` must list
+   DaVinci Resolve with `grade` among its commands. Listed without `grade`:
+   the plugin is older than 0.3.0; ask the person to update NOLGIA for DaVinci
+   Resolve from nolgia.ai/plugins/davinci-resolve and wait, because this
+   workflow needs it. Then `nolgia_app_grade` with `action: "inspect"` (it
+   changes nothing and needs no click): the camera log found for each clip
+   and how it was found, each clip's versions and nodes, and the project's
+   color science. Say in one line what it found. A color managed or ACES
+   project is fine: say that Resolve's color management stays in charge of
+   the conversion and that nothing is measured there.
+2. **The before stills.** `nolgia_app_preview` at a frame with skin or the
+   main subject in good light, in the middle of the hero clip (frames count
+   from 0 at the start of the timeline). Keep the frame number: the after
+   still is taken from the same one. To offer a hero, look at a still of each
+   candidate first and pick the wide.
+3. **The looks that suit it.** Unless the person named one, `nolgia_app_grade`
+   with `action: "looks"` once, and choose two or three by their library
+   names that suit the still (daylight or tungsten, how much contrast, whether
+   skin is in the frame). Wait for a choice unless they said "go", then take
+   your first suggestion.
+4. **Grade.** Tell the person that the NOLGIA window in Resolve will ask them
+   to click **Grade clips**; it changes nothing until they do, and with no
+   NOLGIA window open it does not run (Workspace > Scripts > NOLGIA). Then
+   one `nolgia_app_grade` with everything they chose, for example
+   `{"app": "resolve", "action": "apply", "clips": "all", "match": 2,
+   "look": "kodak-2383-print", "strength": 1}`. For a timeline with more than
+   one scene, send one apply per scene, with that scene's clip numbers in
+   `clips` and its own hero in `match`. If a tool hands back a `command_id`,
+   follow it with `nolgia_app_command` instead of starting it again. If it
+   answers `needs_camera`, ask which camera and send the same apply again
+   with `camera`.
+5. **The after stills.** `nolgia_app_preview` at the same frame as the before
+   still, and one frame from every other clip the grade touched (or, on a
+   long timeline, from each scene and from every clip the answer names).
+   Show before and after and say in two lines what moved (skin, shadows,
+   highlights, saturation). Give the per clip `balance_stops` and
+   `exposure_stops` from the answer.
+6. **A shot left as shot** (plugin 0.3.5 and newer). When the answer has
+   `left_as_shot`, say which clips and why in its own words (`say`): the
+   plugin leaves a shot's color and exposure alone when it cannot tell a
+   camera's mistake from the scene's own color (a close-up with nothing
+   white or grey in it, the ground in late sun), as a colorist would before
+   guessing. Show that clip's still and ask: is the palest bright thing in it
+   really white or grey (a shirt, paper, a wall)? If yes and your
+   `nolgia_app_grade` tool lists `trust_white`, send the apply again for that
+   clip with `trust_white` and its number. If it does not list it, or the
+   answer is no, the clip is theirs to set by eye against the hero on
+   02 BALANCE and 03 EXPOSURE (the Offset wheel of each); offer to go through
+   it with them, a tenth of a stop at a time.
+   On a plugin from 0.3.0 to 0.3.4 no clip is left as shot: a clip whose
+   `balance_stops` differ by more than 0.6 between two channels was moved a
+   long way on what it took for white. Look at its after still; if the color
+   is wrong (a blue or orange wash), tell the person, grade that clip again
+   alone with `correct: false`, and suggest the update.
 
-   | Slug | Name | Description |
-   |---|---|---|
-   | `kodak-vision3-500t` | Kodak Vision3 500T | The modern film workhorse: tungsten balanced, warm shadows, soft highlight roll. |
-   | `kodak-vision3-250d` | Kodak Vision3 250D | Daylight balanced negative: clean neutral skin, fine grain, gentle roll. |
-   | `kodak-vision3-200t` | Kodak Vision3 200T | Medium speed tungsten stock: 500T's warmth with a tighter, cleaner feel. |
-   | `kodak-2383-print` | Kodak 2383 Print | Theatrical print stock: deeper blacks, gentle cyan shadows, warm highlights. Pairs over any negative. |
-   | `kodak-portra-400` | Kodak Portra 400 | Pastel warmth and forgiving skin: low contrast, creamy highlights. |
-   | `kodak-portra-800` | Kodak Portra 800 | Portra's skin with more presence: a touch more contrast and warmth for low light. |
-   | `kodak-ektar-100` | Kodak Ektar 100 | Saturated daylight stock: punchy reds and blues, fine grain, crisp contrast. |
-   | `kodachrome-64` | Kodachrome 64 | The archive look: rich reds, dense shadows, unmistakable warmth. |
-   | `fuji-eterna-3510` | Fuji Eterna 3510 | The cinematic counterweight to Kodak: soft contrast, cool neutral, quiet skin. |
-   | `fuji-eterna-vivid` | Fuji Eterna Vivid | Eterna's cool base with the color turned up: saturated without going warm. |
-   | `fuji-reala-500d` | Fuji Reala 500D | Neutral daylight negative: honest color, natural greens, easy skin. |
-   | `fuji-velvia-50` | Fuji Velvia 50 | The landscape slide: high saturation, deep blues and greens, dense contrast. |
-   | `fuji-provia-100f` | Fuji Provia 100F | The neutral slide: accurate color with slide-film snap, nothing pushed. |
-   | `fuji-superia-400` | Fuji Superia 400 | The consumer 90s negative: green tinted shadows, a magenta bias in skin. |
-   | `cinestill-800t` | CineStill 800T | Tungsten night stock with the remjet gone: teal shadows and red halation blooming around light sources. |
-   | `ilford-hp5` | Ilford HP5 Plus | Documentary black and white: soft contrast, generous shadows, honest grain. |
-   | `kodak-tri-x` | Kodak Tri-X 400 | The classic reportage black and white: punchy contrast, deep blacks, bite. |
-   | `agfa-vista` | Agfa Vista | The corner store classic: warm reds against slightly cool shadows. |
-   | `arri-alexa-rec709` | ARRI Alexa Rec709 | The K1S1 LogC to Rec709 look: the neutral cinematic display transform. |
+## Change it
 
-   Film stock and camera names are trademarks of their owners and describe the
-   look each emulates. NOLGIA is not affiliated with or endorsed by them.
-
-   Daylight footage with people usually wants Portra 400, Vision3 250D or
-   Reala 500D; tungsten interiors Vision3 500T or 200T; neon and street light
-   at night CineStill 800T; landscapes Ektar 100 or Velvia 50. The list also
-   holds stylised looks (teal and orange, bleach bypass, cross process, and
-   others): offer those only when the person asks for a stylised look. Wait
-   for a choice unless they said "go", then take your first suggestion.
-4. **Install the stock.** `nolgia_app_import` with `color_preset: "<slug>"` and
-   nothing else. For camera log footage pass the stock's log version: the
-   same slug with the camera's suffix, `-slog3` (Sony S-Log3 /
-   S-Gamut3.Cine), `-logc3` (ARRI LogC3), `-vlog` (Panasonic V-Log) or
-   `-bmdfilm5` (Blackmagic Film Gen 5), for example `kodak-portra-400-slog3`.
-   That LUT converts the log picture to Rec.709 with a film curve and then
-   applies the stock, in one node, so the flat clip comes out finished. Use
-   the plain stock instead when the log is already converted before your
-   node: a Color Space Transform or a camera LUT in the clip's grade, an
-   `Input Color Space` set on the clip, or a color managed project
-   (`colorScienceMode` is not `davinciYRGB`); converting twice crushes it.
-   Say which you installed and why. The import installs `<name>.cube` in the
-   `NOLGIA` folder of Resolve's LUT folder, refreshes the LUT list and answers
-   `lut` (the path Resolve lists it under, `NOLGIA/Kodak Portra 400.cube`, or
-   `NOLGIA/Kodak Portra 400 (S-Log3).cube` for the log version) and `path`
-   (the file). Keep `lut`.
-5. **Apply it in a place of its own.** One `nolgia_app_run`, in this order of
-   preference, never on a node that already holds tools or a LUT. An empty
-   node is one where `GetToolsInNode(i)` answers None or `[]` and `GetLUT(i)`
-   is `""`:
-   - *Each clip:* `g = item.GetNodeGraph()`, find an empty node, preferring
-     the last one so the stock comes after their corrections (an ungraded
-     clip has one node, empty), call `g.SetLUT(i, lut)` and read `g.GetLUT(i)`
-     back.
-   - *All clips at once, only when the timeline graph has an empty node:*
-     `g = timeline.GetNodeGraph()`; when `g.GetNumNodes()` is at least 1 and
-     one node is empty, `SetLUT` there and every clip gets the stock after its
-     own grade. A fresh timeline graph has no node and the API cannot add
-     one, so this is the exception, not the default.
-   - *A clip with no empty node:* the API cannot add a node. Either add a new
-     local color version named `NOLGIA <stock name>`
-     (`item.AddVersion(name, 0)` then `item.LoadVersionByName(name, 0)`),
-     read what its graph holds with `GetNumNodes()` and `GetToolsInNode(i)`
-     before you set the LUT on an empty node of it, and tell the person that
-     their own version is still there under the clip's Versions menu; or ask
-     the person to add a serial node at the end of the grade of those clips
-     (Alt+S, Option+S on a Mac, on the Color page) and say which clips.
-   Grading calls work on the Color page: if `GetNodeGraph()` answers None or
-   `SetLUT` keeps answering False, read `resolve.GetCurrentPage()`, switch
-   with `resolve.OpenPage("color")`, run the step and put the page back.
-   `SetLUT` takes `lut` (relative) or `path` (absolute); if both answer False,
-   call `project.RefreshLUTList()` once and try again. Record in `result`,
-   per clip, exactly where the stock went (timeline node 1, clip node 3, or
-   version name) and which clips got nothing and why.
-6. **The after still.** `nolgia_app_preview` at the same `frame` as the before
-   still. Show both and say what changed in two lines (skin, shadows,
-   highlights, saturation). Then offer: keep it, try another stock (set the
-   new `lut` on the same node with `SetLUT`, so there is still only one), or
-   dial it back.
-7. **Dialling it back.** The scripting API cannot read or set a node's key
-   output gain, so say where it is: Color page, click the node that holds the
-   stock, open the Key palette and lower Key Output Gain (1.0 is the full
-   stock, about 0.5 is half). `SetNodeEnabled(i, False)` switches the node off
-   and on again for a quick comparison. A gentler stock (Portra 400 instead
-   of Ektar 100, Vision3 250D instead of 2383) is the other way.
+- Another look, or the same look weaker or stronger: `nolgia_app_grade` with
+  `action: "look"`, `look` and `strength`. Only the 07 LOOK node changes;
+  what the person changed on the other nodes stays. `look: "none"` switches
+  it off. It asks for the Grade clips click again.
+- A LUT on their computer works the same way with `lut`. When the picture
+  comes out wrong (washed out or crushed), the LUT expects another input:
+  send it again with `lut_input` (`cineon`, `rec709`, or the camera log).
+- Less or more color or contrast under the look: 05 SAT (Primaries
+  Saturation) and 04 CONTRAST (Primaries Contrast) by hand, or an apply with
+  `saturation` or `contrast` (1 is none, 0.85 is a little less), which makes
+  a new version next to the first.
+- By hand: 02 BALANCE and 03 EXPOSURE are the Offset wheel; the look's
+  strength steps are in the 07 LOOK node's LUT menu (NOLGIA Grade > Looks >
+  the look's family).
 
 ## Check
 
-- Before and after at the timeline's width (the plugin caps `width` at it): skin must still read as
-  skin (no green or magenta cast), blacks must not be crushed and highlights
-  must not clip harder than before; on log footage the after still must look
-  like a finished picture, not still flat (a plain stock on log) and not harsh
-  (a log version on footage already converted); a stock stacked on a clip that already had
-  a LUT must be said and shown.
-- Read the grades again, as in step 1, and compare: every node the person had
-  still has the same label, tools and LUT; the only differences are the node
-  (or version) you used.
-- Preview two more frames (a darker clip, a second scene) and look at them.
+- The apply's answer: every clip in scope is listed with a `version`. A clip
+  whose `measured` says `skipped` was not measured: say which and why.
+  `residual_after_first_pass` is what the second measurement found left after
+  the first correction; more than half a stop there means the clip was hard
+  to read (night, no white or skin in the frame): look at that clip's still
+  and name it in the reply.
+- The after stills, with the look on, at the timeline's width (the plugin
+  caps `width` at it). Skin reads as skin, with no green or magenta cast;
+  shadows still hold detail a little above black; highlights stay under
+  white, with only the sun, lamps, windows and glints at the very top; a
+  white or grey object reads neutral; nothing clips that did not clip before.
+  Log footage now looks like a finished picture, not flat. When a still fails
+  one of these, say which and what you would change (a weaker look, less
+  saturation, a clip set by eye); do not call it done.
+- The match, judged on the cut: put the after stills of neighbouring clips
+  side by side. Skin and the same objects should sit at the same color and
+  level from shot to shot.
+- The person's own grade: each clip's own version is still in its Versions
+  menu (`your_version` in the answer), unchanged.
 
 ## Deliver
 
-Save the project. Export the after frame with `nolgia_app_export` `png`, and
-offer an `mp4` of a short range (`frames` such as `0-119`) so they can see the
-stock in motion. Tell the person: the stock's name and its LUT path
-(`NOLGIA/<name>.cube`), where it sits on each clip (timeline node, clip node
-or version), how to switch it off (the node's toggle on the Color page, or
-their own version in the clip's Versions menu), how to dial it back (Key
-Output Gain), and the path of the safety copy.
+Save the project with `nolgia_app_save`. Export the after frame with
+`nolgia_app_export` `png`, and offer an `mp4` of a short range (`frames` such
+as `0-119`) so they can see it in motion. Tell the person: the hero, the look
+and its strength, the table of corrections per clip, which clips were left
+as shot and why, the version name on each clip (`NOLGIA grade`) and that
+their own grade is in the clip's Versions menu, the eight nodes they can
+adjust, how to change the look or switch it off (the 07 LOOK node, or ask
+for another), that NOLGIA's look files are in NOLGIA Grade in Resolve's LUT
+folder, and the path of the safety copy.
 
-What this workflow never does: it never changes, resets or disables the
-person's own nodes, LUTs, versions or settings; it never adds a LUT to a node
-that holds anything; and it never renders, overwrites or deletes anything
-without asking first.
+What this workflow never does: it never changes, resets or deletes the
+person's own nodes, LUTs, versions or settings; it never puts a look before
+the corrections or corrects a clip after the look; it never grades a
+timeline they did not ask about; and it never renders, overwrites or deletes
+anything without asking first.
