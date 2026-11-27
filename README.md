@@ -427,9 +427,9 @@ correction), still gets the eight nodes, and is named: `left_as_shot` on the
 clip and on the answer, with a sentence for the person. `trust_white` with the
 clip's number corrects it as measured when the palest bright thing in it
 really is white or grey. Before, a close-up with nothing white or grey in it
-was moved as far as the measurement said (on the scene below a move 0.88
-stops wide, which turned the shot blue). The Grade workflow's text now offers a wide shot as the hero, never an
-insert. Unit tests (four new in tests/test_grading.py) on Python 3.9 and 3.14,
+was moved as far as the measurement said (on the scene below, 0.88 stops
+toward blue and two stops brighter). The Grade workflow's text now offers a
+wide shot as the hero, never an insert. Unit tests (four new in tests/test_grading.py) on Python 3.9 and 3.14,
 and the engine's own measurement and correction run outside Resolve on stills
 of a real three-shot Sony S-Log3 scene: two shots corrected as before, the
 third left as shot. The node build did not change; this release was not yet
