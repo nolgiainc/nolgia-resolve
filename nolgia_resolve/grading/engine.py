@@ -20,8 +20,13 @@ Balance and exposure are measured from the clip's own frames, in scene light,
 after CST IN: the white of the least saturated bright pixels, and the key
 (the mid-tones' geometric mean brightness). Matching moves each clip's white
 and level to the hero clip's.
+
+Last, the finished picture: the same frames exported with every node on, as
+the viewer shows them, read against the colour standard's table for the final
+picture (scopes.py). That only reports: flags for a person, never a move.
 """
 
+import json
 import math
 import os
 import shutil
@@ -34,6 +39,7 @@ from . import drx
 from . import library
 from . import looks as L
 from . import measure as M
+from . import scopes as S
 from . import userluts
 
 ACTIONS = ("looks", "inspect", "apply", "look")
@@ -51,6 +57,9 @@ MAX_EXPOSURE_STOPS = 2.0
 # white in it. No measurement tells those two apart, and a move made on the wrong guess paints the shot, so the shot is
 # left as it was shot and named for the person, who can say it is a white with `trust_white`.
 BALANCE_TRUST_STOPS = 0.6
+# A command's result reaches NOLGIA only under 1 MB (core.commands.MAX_RESULT_BYTES). When a long timeline's answer
+# would pass this, each clip's finished picture keeps only the rows outside the table, so the check never fails a grade.
+RESULT_ROOM = 900 * 1000
 
 
 def call(obj, method, *args, **kw):
@@ -206,6 +215,10 @@ def describe(args, caller="NOLGIA Agent"):
         lines.append("Look: none (the LOOK node is switched off).")
     lines.append("Every step lands as labelled nodes you can adjust. Each clip gets a new color version, "
                  "\"NOLGIA grade\"; your own grade stays in the clip's Versions menu.")
+    if args["action"] == "apply":
+        lines.append("Last, unless the project is colour managed, it reads each clip's finished picture, every node "
+                     "on, against the scopes' table (shadows, highlights, clipping, skin) and names what sits outside "
+                     "it, for you to look at; that check changes nothing.")
     if "NOLGIA Agent" in (caller or ""):
         lines.append("The grading runs in DaVinci Resolve on this computer and costs no NOLGIA credits; the NOLGIA "
                      "Agent turn that asked for it is billed as usual.")
@@ -377,6 +390,7 @@ class Grader(object):
 
     def still_stats(self, project, tl, facts, offsets, folder):
         stats = []
+        skin_at = {}
         for k, offset in enumerate(offsets):
             path = os.path.join(folder, "m%d.tif" % k)
             target = self.ops.offset_timecode(facts, offset)
@@ -385,13 +399,19 @@ class Grader(object):
             if not self.ops._export_still(project, path):
                 continue
             try:
-                stats.append(M.measure(M.read_tiff_grid(path)))
+                st = M.measure(M.read_tiff_grid(path))
             finally:
                 try:
                     os.remove(path)
                 except OSError:
                     pass
-        return M.combine(stats) if stats else {"ok": False, "why": "DaVinci Resolve exported no frame"}
+            if st.get("skin_at"):
+                skin_at[k] = st.pop("skin_at")
+            stats.append(st)
+        out = M.combine(stats) if stats else {"ok": False, "why": "DaVinci Resolve exported no frame"}
+        if skin_at:
+            out["skin_at"] = skin_at  # {frame's place in offsets: grid points taken as skin}, for finished_picture
+        return out
 
     def tree(self, camera, science, balance=(0, 0, 0), exposure=0.0, args=None, look_path=None):
         args = args or {}
@@ -607,7 +627,17 @@ class Grader(object):
                     results[n]["measured"] = {"skipped": stats[n].get("why")}
             if corrections:
                 self.verify(clips, project, tl, facts, folder, results, args, corrections, cameras, science, look_path)
+            order = [n for n, _ in clips]
+            try:
+                finished = self.finished_pictures(clips, project, tl, facts, folder, args, science, stats)
+                finished_summary = S.summary(finished, order)
+            except Exception as err:  # the check reports; it never fails the grade
+                why = "the check stopped: %s" % err
+                finished = dict((n, {"read": False, "why": why}) for n in order)
+                finished_summary = {"outside": [], "unread": order, "table": S.TABLE,
+                                    "say": "The finished picture was not read (%s). The grade itself is done." % why}
             for n, item in clips:
+                results[n]["finished_picture"] = finished[n]
                 results[n]["nodes"] = [{"node": d["node"], "label": d["label"], "lut": d["lut"]} for d in self.read_graph(item)]
         finally:
             if before_tc:
@@ -618,7 +648,8 @@ class Grader(object):
                "clips": [results[n] for n, _ in clips], "hero": args["match"], "seconds": round(time.time() - started, 1),
                "look": args["look"], "strength": args["strength"] if (args["look"] not in (None, "none") or args.get("lut")) else None,
                "lut": _lut_brief(self.lut_used) if getattr(self, "lut_used", None) else None,
-               "lut_folder": os.path.join(root, library.SUBFOLDER), "cost": "free: it ran in DaVinci Resolve"}
+               "lut_folder": os.path.join(root, library.SUBFOLDER), "cost": "free: it ran in DaVinci Resolve",
+               "finished_picture": finished_summary}
         left = [results[n] for n, _ in clips if results[n].get("left_as_shot")]
         if left:
             against = (" against clip %d" % args["match"]) if args["match"] else ""
@@ -644,6 +675,69 @@ class Grader(object):
                            "correction was not measured; the look matches the project's working space%s." % (
                                mode, " (ACEScct), and SKIN is left empty, as it works in DaVinci Wide Gamut"
                                if science == "aces" else ""))
+        return fit_result(out)
+
+    # .......................................................... the finished picture
+
+    def finished_pictures(self, clips, project, tl, facts, folder, args, science, stats):
+        """{clip: finished_picture}: each graded clip's frames with every node on, read against the colour standard's
+        table for the final picture (scopes.py). It only reads: no wheel moves and no node is switched.
+
+        No node needs switching: every export before this one has 04 to 08 off (the measurement), but a tree applied
+        from a .drx has every node on, and verify switches 04 to 08 back on after its own measurement. So the frame
+        exported here is the tree as the grade leaves it, which is also what the viewer shows."""
+        if science != "yrgb":
+            why = ("the project is colour managed, so Resolve's own output transform makes the display picture and "
+                   "the plugin does not know the still's colour space; it reads the finished picture only where its "
+                   "own CST OUT makes Rec.709")
+            return dict((n, {"read": False, "why": why}) for n, _ in clips)
+        out = {}
+        for n, item in clips:
+            try:
+                out[n] = self.finished_picture(n, item, project, tl, facts, folder, args, stats.get(n))
+            except Exception as err:  # one clip's check never fails the grade
+                out[n] = {"read": False, "why": "the check stopped: %s" % err}
+        return out
+
+    def finished_picture(self, n, item, project, tl, facts, folder, args, st):
+        """One clip: the same frames the grade measured (frame_offsets), no more."""
+        skin_at = (st or {}).get("skin_at") or {}
+        stills, skin, failed = [], [], None
+        for k, offset in enumerate(self.frame_offsets(item, facts, args["frames"])):
+            path = os.path.join(folder, "f%d.tif" % k)
+            if not self.ops.set_playhead(tl, self.ops.offset_timecode(facts, offset)):
+                failed = "DaVinci Resolve did not move the playhead to its frames"
+                continue
+            if not self.ops._export_still(project, path):
+                failed = "DaVinci Resolve exported no frame"
+                continue
+            still = None
+            try:
+                still = S.read_still(path)
+            except Exception as err:
+                failed = "its still could not be read: %s" % err
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            if still is None:
+                continue
+            stills.append(still)
+            grid = still["grid"]
+            skin.extend(grid[i] for i in skin_at.get(k, ()) if i < len(grid))
+        if not stills:
+            return {"read": False, "why": failed or "no frame"}
+        if st is None:
+            skin_why = "the grade did not measure this clip (correct was off), so it knows no skin in it"
+        elif not st.get("ok"):
+            skin_why = "the grade could not measure this clip (%s)" % st.get("why")
+        else:
+            skin_why = "the grade's measurement found no skin in this clip's frames"
+        out = S.check(stills, skin, skin_why)
+        say = S.sentence(n, out)
+        if say:
+            out["say"] = say
         return out
 
     def corrections(self, clips, stats, args, prefer=None):
@@ -806,6 +900,21 @@ class Grader(object):
                 results[n]["balance_stops"] = [round(b, 3) for b in bal]
                 results[n]["exposure_stops"] = round(exp, 3)
                 results[n]["second_pass"] = True
+
+
+def fit_result(out):
+    """The answer, with each clip's finished picture cut to the rows outside the table if it would be too long."""
+    if len(json.dumps(out, separators=(",", ":"), default=str)) <= RESULT_ROOM:
+        return out
+    for clip in out.get("clips") or []:
+        picture = clip.get("finished_picture")
+        if picture and picture.get("read"):
+            clip["finished_picture"] = {"read": True, "outside": picture.get("outside", [])}
+    if out.get("finished_picture"):
+        out["finished_picture"]["trimmed"] = (
+            "The answer was too long for every clip's numbers: each clip keeps only the rows that sit outside the "
+            "table, and say has the first %d clips' sentences." % S.SAY_CLIPS)
+    return out
 
 
 def _lut_brief(entry):

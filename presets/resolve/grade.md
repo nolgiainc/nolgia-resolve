@@ -61,6 +61,16 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
    clip with `trust_white`; if no, tell them it is theirs to set by eye on the
    BALANCE and EXPOSURE nodes against the hero, and offer to nudge it with
    them, a tenth of a stop at a time.
+6. If the answer's `finished_picture` names clips in `outside`, give its
+   `say` in your own words: the plugin read each clip's finished picture
+   (every node on, what the viewer shows) against the scopes' table, and
+   says where it sits outside it (shadows, highlights, clipping, skin; the
+   parade is reported, never flagged). These are flags to look at, never
+   targets: show that clip's after still and ask whether it is meant (a
+   night scene, a bright window and a backlit face sit outside on
+   purpose). Never call the grade wrong for them, and never change it to
+   bring a number inside on your own. A clip in `unread` was not checked:
+   say which and why.
 
 ## Change it
 
@@ -77,5 +87,6 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
 ## Deliver
 
 Save the project. Tell the person: the hero, the look and strength, the table
-of corrections per clip, the version name on each clip and where their own
-grade is, and that the files are in NOLGIA Grade in Resolve's LUT folder.
+of corrections per clip, which clips' finished picture sits outside the
+scopes' table and on which rows, the version name on each clip and where their
+own grade is, and that the files are in NOLGIA Grade in Resolve's LUT folder.

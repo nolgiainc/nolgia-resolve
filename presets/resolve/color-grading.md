@@ -139,6 +139,20 @@ them.
   the first correction; more than half a stop there means the clip was hard
   to read (night, no white or skin in the frame): look at that clip's still
   and name it in the reply.
+- The finished picture, when the answer has `finished_picture`: the plugin
+  read each clip's frames with every node on, the picture the viewer shows,
+  against the scopes' table (shadows about 5 to 10% above black, highlights
+  under about 90% with the top tenth for the sun, lamps, windows and glints,
+  no clipping, skin highlights about 50 to 75%). The parade, each channel's
+  top and bottom, is reported, never flagged: the plugin cannot find a
+  neutral object in the frame, and warm light that was meant, a coloured
+  thing or a look's own tint part the channels. For every clip in
+  `outside`, give `say` in your own words next to that clip's after still
+  and ask the person whether it is meant (a night scene, a bright window, a
+  backlit face sit outside on purpose). These are flags for the person,
+  never targets: never call the grade wrong for them, and never change it
+  to bring a number inside on your own. A clip in `unread` was not checked:
+  say which and why.
 - The after stills, with the look on, at the timeline's width (the plugin
   caps `width` at it). Skin reads as skin, with no green or magenta cast;
   shadows still hold detail a little above black; highlights stay under
@@ -159,7 +173,8 @@ Save the project with `nolgia_app_save`. Export the after frame with
 `nolgia_app_export` `png`, and offer an `mp4` of a short range (`frames` such
 as `0-119`) so they can see it in motion. Tell the person: the hero, the look
 and its strength, the table of corrections per clip, which clips were left
-as shot and why, the version name on each clip (`NOLGIA grade`) and that
+as shot and why, which clips' finished picture sits outside the scopes' table
+and on which rows, the version name on each clip (`NOLGIA grade`) and that
 their own grade is in the clip's Versions menu, the eight nodes they can
 adjust, how to change the look or switch it off (the 07 LOOK node, or ask
 for another), that NOLGIA's look files are in NOLGIA Grade in Resolve's LUT

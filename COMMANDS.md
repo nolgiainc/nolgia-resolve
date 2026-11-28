@@ -274,13 +274,54 @@ a sentence for the person). The person balances it by eye on 02 BALANCE and 03
 EXPOSURE; or, when the palest bright thing in the shot really is white or
 grey, `trust_white` with the clip's number corrects it as measured.
 
+**The finished picture.** Last, the grade reads what it made, as a colourist
+checks a grade on the scopes before calling it done: the same frames it
+measured (no extra frames), exported with every node on, so the Rec.709
+picture CST OUT makes, what the viewer shows. It reads them against the table
+of NOLGIA's colour standard for the final picture and says what sits outside
+it. It only reports: it moves no wheel and switches no node. Each clip's
+`finished_picture` holds `read`, `frames`, `points` (the grid points read,
+160 x 90 a frame, all frames pooled), `waveform` (luma percentiles in % of the
+range: `p0.1` the bottom, `p1`, `p5` the shadows, `p50` the middle, `p95` and
+`p99` the highlights, `p99.9` the top), `rows`, `outside` (the names of the
+rows outside the table) and, when one is, `say`: one sentence for the person.
+Each row has a `value` and a `status`: `inside`; `outside`, with `by` (how
+far, in the row's unit) and for some rows `side` (`under` or `over`);
+`reported` (shown, never flagged: the parade and saturation); or `not_read`,
+with `why`.
+
+| Row | `value` and the rest | The table |
+|---|---|---|
+| `shadows` | where the darkest 5% of the frame sit, in % of the range | about 5 to 10% above black; flagged under 3% or over 15% |
+| `highlights` | the % of the frame over 90%; `reach`, where the brightest 1% start | stop under about 90%; the top tenth is for the sun, lamps, windows and speculars, about 2% of the frame at most |
+| `clipping` | the most of any channel's pixels at its very bottom or top (at or under 1/255 of the range, at or over 254/255), in %; `channels`, `[at black, at white]` per channel; `pixels`, how many were counted: every pixel of the frames, since the grid is too coarse for 0.1% | none unless meant: at most 0.1% |
+| `parade` | `tops` and `bottoms`, each channel's 99.5th and 0.5th percentile (red, green, blue); `tops_apart`, `bottoms_apart` | a neutral object is level across red, green and blue. `reported` only, never flagged: the check cannot find a neutral object in a frame, and on a whole frame warm light that was meant, a coloured thing or a look's own tint parts the channels. Tops apart with level bottoms is light or a coloured thing in the frame; apart at the bottoms too is colour reaching into the blacks |
+| `skin` | skin highlights, the 90th percentile of the skin's level; `median`, `points`, `share` (% of the points), `hue_off_skin_line_deg` (a guide, not a rule) | about 50 to 75% (one official source) |
+| `saturation` | `mean` and `p95` of (max - min) / max | no row: `reported` |
+
+Skin is read at the points the grade's own measurement took as skin (found by
+colour after CST IN, with the white's cast taken out; the plugin has no face
+finder), so sand, wood or a tan wall can pass for it. With `correct: false`
+nothing was measured, and `skin` is `not_read`. The answer's own
+`finished_picture` holds `outside` and `unread` (clip numbers), `say` (the
+clips' sentences, ten at most, and that these are flags for the person to look
+at, never targets: a night scene, a bright window, a backlit face or a look can
+sit outside the table on purpose) and `table` (what each row reads, in words).
+When Resolve exports no frame, or the still cannot be read, that clip's
+`finished_picture` is `{read: false, why}` and the grade succeeds all the same.
+In a colour managed or ACES project nothing is read: Resolve's own output
+transform makes the display picture there. When an answer would pass the 1 MB
+NOLGIA takes, each clip keeps only `{read, outside}` and the answer's
+`finished_picture` says `trimmed`. `look` does not read the finished picture.
+
 Result: `{project, timeline, color_science, hero, look, strength, lut_folder,
 seconds, cost, clips: [{clip, name, camera, camera_found_by, version,
 your_version, balance_stops: [r, g, b], exposure_stops, matched_on, measured,
-residual_after_first_pass, second_pass?, nodes: [{node, label, lut}]}],
-note?, warning?}`. When `camera` is `auto` and a clip says nothing about its
-log, it fails with `result: {needs_camera: [...], choices: [...]}`: ask the
-person.
+residual_after_first_pass, second_pass?, left_as_shot?, finished_picture,
+nodes: [{node, label, lut}]}], left_as_shot?, finished_picture: {outside,
+unread, say, table, trimmed?}, note?, warning?}`. When `camera` is `auto` and a
+clip says nothing about its log, it fails with `result: {needs_camera: [...],
+choices: [...]}`: ask the person.
 
 **`look`.** Sets another look or LUT (or strength) on the LOOK node of clips
 NOLGIA graded, found by its label, leaving every other node as it is; `none`
