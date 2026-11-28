@@ -143,13 +143,16 @@ them.
   read each clip's frames with every node on, the picture the viewer shows,
   against the scopes' table (shadows about 5 to 10% above black, highlights
   under about 90% with the top tenth for the sun, lamps, windows and glints,
-  no clipping, the parade's channels level, skin highlights about 50 to 75%).
-  For every clip in `outside`, give `say` in your own words next to that
-  clip's after still and ask the person whether it is meant (a night scene,
-  a bright window, a backlit face sit outside on purpose). These are flags
-  for the person, never targets: never call the grade wrong for them, and
-  never change it to bring a number inside on your own. A clip in `unread`
-  was not checked: say which and why.
+  no clipping, skin highlights about 50 to 75%). The parade, each channel's
+  top and bottom, is reported, never flagged: the plugin cannot find a
+  neutral object in the frame, and warm light that was meant, a coloured
+  thing or a look's own tint part the channels. For every clip in
+  `outside`, give `say` in your own words next to that clip's after still
+  and ask the person whether it is meant (a night scene, a bright window, a
+  backlit face sit outside on purpose). These are flags for the person,
+  never targets: never call the grade wrong for them, and never change it
+  to bring a number inside on your own. A clip in `unread` was not checked:
+  say which and why.
 - The after stills, with the look on, at the timeline's width (the plugin
   caps `width` at it). Skin reads as skin, with no green or magenta cast;
   shadows still hold detail a little above black; highlights stay under

@@ -64,12 +64,13 @@ clip's Versions menu. The grading itself costs no NOLGIA credits.
 6. If the answer's `finished_picture` names clips in `outside`, give its
    `say` in your own words: the plugin read each clip's finished picture
    (every node on, what the viewer shows) against the scopes' table, and
-   says where it sits outside it (shadows, highlights, clipping, the
-   parade, skin). These are flags to look at, never targets: show that
-   clip's after still and ask whether it is meant (a night scene, a bright
-   window and a backlit face sit outside on purpose). Never call the grade
-   wrong for them, and never change it to bring a number inside on your own.
-   A clip in `unread` was not checked: say which and why.
+   says where it sits outside it (shadows, highlights, clipping, skin; the
+   parade is reported, never flagged). These are flags to look at, never
+   targets: show that clip's after still and ask whether it is meant (a
+   night scene, a bright window and a backlit face sit outside on
+   purpose). Never call the grade wrong for them, and never change it to
+   bring a number inside on your own. A clip in `unread` was not checked:
+   say which and why.
 
 ## Change it
 

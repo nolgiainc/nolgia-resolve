@@ -287,14 +287,15 @@ range: `p0.1` the bottom, `p1`, `p5` the shadows, `p50` the middle, `p95` and
 rows outside the table) and, when one is, `say`: one sentence for the person.
 Each row has a `value` and a `status`: `inside`; `outside`, with `by` (how
 far, in the row's unit) and for some rows `side` (`under` or `over`);
-`reported` (no row in the table); or `not_read`, with `why`.
+`reported` (shown, never flagged: the parade and saturation); or `not_read`,
+with `why`.
 
 | Row | `value` and the rest | The table |
 |---|---|---|
 | `shadows` | where the darkest 5% of the frame sit, in % of the range | about 5 to 10% above black; flagged under 3% or over 15% |
 | `highlights` | the % of the frame over 90%; `reach`, where the brightest 1% start | stop under about 90%; the top tenth is for the sun, lamps, windows and speculars, about 2% of the frame at most |
 | `clipping` | the most of any channel's pixels at its very bottom or top (at or under 1/255 of the range, at or over 254/255), in %; `channels`, `[at black, at white]` per channel; `pixels`, how many were counted: every pixel of the frames, since the grid is too coarse for 0.1% | none unless meant: at most 0.1% |
-| `parade` | `tops` and `bottoms`, each channel's 99.5th and 0.5th percentile (red, green, blue); `tops_apart`, `bottoms_apart`; `apart` | a neutral object is level across red, green and blue. Apart is more than 5 points at the tops or 2 at the bottoms, NOLGIA's own bounds (the standard gives no number). Tops apart with level bottoms is how light that was meant looks, a strongly coloured thing in the frame, or a cast in the light (a display picture barely parts the bottoms for a cast); apart at the bottoms is colour reaching into the blacks |
+| `parade` | `tops` and `bottoms`, each channel's 99.5th and 0.5th percentile (red, green, blue); `tops_apart`, `bottoms_apart` | a neutral object is level across red, green and blue. `reported` only, never flagged: the check cannot find a neutral object in a frame, and on a whole frame warm light that was meant, a coloured thing or a look's own tint parts the channels. Tops apart with level bottoms is light or a coloured thing in the frame; apart at the bottoms too is colour reaching into the blacks |
 | `skin` | skin highlights, the 90th percentile of the skin's level; `median`, `points`, `share` (% of the points), `hue_off_skin_line_deg` (a guide, not a rule) | about 50 to 75% (one official source) |
 | `saturation` | `mean` and `p95` of (max - min) / max | no row: `reported` |
 

@@ -11,16 +11,17 @@ read against NOLGIA's colour standard's table for the final picture:
     windows and speculars, a small share of the frame (2%);
   * clipping: none unless meant, at most 0.1% of a channel's pixels at its very
     bottom or top;
-  * a neutral object is level across red, green and blue: the parade, each
-    channel's bottom and top, so a cast shows as tops or bottoms apart;
+  * a neutral object is level across red, green and blue. The parade, each
+    channel's bottom and top, is reported only: the check cannot find a
+    neutral object in a frame, and on a whole frame warm light that was meant,
+    a coloured thing or a look's own tint parts the channels;
   * skin highlights about 50 to 75% (one official source);
   * saturation, reported only (the table has no row for it).
 
 The maths and the bounds are those of scopecheck.py, the tool the standard names
 for this check (numpy and OpenCV, run outside Resolve), ported to the standard
-library. The parade's two bounds are NOLGIA's own: the standard gives no number.
-A number outside the table is a flag for a person to look at, never a target to
-grade toward. Nothing here changes a picture.
+library. A number outside the table is a flag for a person to look at, never a
+target to grade toward. Nothing here changes a picture.
 
 What each row rests on:
   * the waveform, the top tenth, the parade and saturation: the grid the grade
@@ -48,16 +49,12 @@ SPECULAR_SHARE_MAX = 2.0              # the top tenth is for the sun, lamps, win
 SKIN_LO, SKIN_HI = 50.0, 75.0         # skin highlights about 50 to 75% (one official source)
 CLIP_SHARE_MAX = 0.1                  # percent of pixels at the very end of a channel
 SKIN_LINE_DEG = 123.0                 # the vectorscope's skin line, degrees in the Cb/Cr plane (Cr up, Cb right)
-# NOLGIA's own (the standard says "level" and gives no number). On a neutral grey ramp NOLGIA's print looks keep the
-# tops within about 2 points and the bottoms within about 1.5; tinted looks (teal and orange, cross process) and
-# warm light spread them by 5 to 15.
-TOPS_APART_MAX = 5.0                  # points of the range between the highest and lowest channel's top
-BOTTOMS_APART_MAX = 2.0               # ... and bottom
 SKIN_MIN_POINTS = 30
 
 WAVEFORM = (("p0.1", 0.001), ("p1", 0.01), ("p5", 0.05), ("p50", 0.5), ("p95", 0.95), ("p99", 0.99),
             ("p99.9", 0.999))
 ROWS = ("shadows", "highlights", "clipping", "parade", "skin", "saturation")
+REPORTED = ("parade", "saturation")   # shown, never flagged
 CHANNELS = (("r", "red"), ("g", "green"), ("b", "blue"))
 
 # What each row reads and its target, said once on the answer (the clips carry only numbers).
@@ -70,13 +67,12 @@ TABLE = {
     "clipping": "value: the most of any channel's pixels at its very bottom or top (at or under 1/255 of the range, "
                 "at or over 254/255), in %, every pixel of the frames read; channels: [at black, at white] per "
                 "channel. None unless meant: at most 0.1%.",
-    "parade": "tops and bottoms: each channel's 99.5th and 0.5th percentile (red, green, blue), in % of the range. A "
-              "neutral object is level across red, green and blue. Tops apart while the bottoms stay level is how "
-              "light that was meant looks (warm sun, practicals), or a strongly coloured thing in the frame; a cast "
-              "in the light reads the same here, since a display picture barely parts the bottoms for it. Apart at "
-              "the bottoms too is colour reaching into the blacks (a look's own tint, or a cast through the whole "
-              "picture). Apart means more than 5 points at the tops or 2 at the bottoms: NOLGIA's own bounds, the "
-              "standard gives no number.",
+    "parade": "tops and bottoms: each channel's 99.5th and 0.5th percentile (red, green, blue), in % of the range; "
+              "tops_apart and bottoms_apart: the highest channel less the lowest, in points. A neutral object is "
+              "level across red, green and blue. Reported only: the check cannot find a neutral object in a frame, "
+              "and on a whole frame warm light that was meant, a coloured thing or a look's own tint parts the "
+              "channels. To read it: tops apart while the bottoms stay level is light (warm sun, practicals) or a "
+              "coloured thing in the frame; bottoms apart too is colour reaching into the blacks.",
     "skin": "value: skin highlights, the 90th percentile of the skin's level, in % of the range: about 50 to 75% "
             "(one official source). Skin is the points the grade's own measurement took as skin, by colour (the "
             "plugin has no face finder), read in the finished picture; sand, wood or a tan wall can pass for skin. "
@@ -189,8 +185,8 @@ def skin_numbers(values, share=None):
 # ------------------------------------------------------------------ the table's rows
 
 def rows(m, skin=None, skin_why=None):
-    """{row: {value..., status, by?}}: status is inside, outside (by how much, in the row's unit), reported (no row in
-    the table) or not_read."""
+    """{row: {value..., status, by?}}: status is inside, outside (by how much, in the row's unit), reported (shown,
+    never flagged: the parade and saturation) or not_read."""
     out = {}
     p5 = m["waveform"]["p5"]
     if p5 < SHADOW_LO - SHADOW_FLAG_UNDER:
@@ -211,15 +207,8 @@ def rows(m, skin=None, skin_why=None):
         out["clipping"].update(status="outside", by=round(worst - CLIP_SHARE_MAX, 3))
     tops = [m["parade"][c]["top"] for c, _ in CHANNELS]
     bottoms = [m["parade"][c]["bottom"] for c, _ in CHANNELS]
-    tops_apart = round(max(tops) - min(tops), 1)
-    bottoms_apart = round(max(bottoms) - min(bottoms), 1)
-    apart = [name for name, gap, bound in (("tops", tops_apart, TOPS_APART_MAX),
-                                           ("bottoms", bottoms_apart, BOTTOMS_APART_MAX)) if gap > bound]
-    out["parade"] = {"tops": tops, "bottoms": bottoms, "tops_apart": tops_apart, "bottoms_apart": bottoms_apart,
-                     "status": "outside" if apart else "inside"}
-    if apart:
-        excess = {"tops": tops_apart - TOPS_APART_MAX, "bottoms": bottoms_apart - BOTTOMS_APART_MAX}
-        out["parade"].update(apart=apart, by=round(max(excess[a] for a in apart), 1))
+    out["parade"] = {"tops": tops, "bottoms": bottoms, "tops_apart": round(max(tops) - min(tops), 1),
+                     "bottoms_apart": round(max(bottoms) - min(bottoms), 1), "status": "reported"}
     if skin and skin["points"] >= SKIN_MIN_POINTS:
         level = skin["highlights_p90"]
         row = {"value": level, "status": "inside"}
@@ -245,7 +234,7 @@ def check(stills, skin=None, skin_why=None):
         s = skin_numbers(skin, share=len(skin) * 100.0 / m["points"])
     r = rows(m, s, skin_why)
     return {"read": True, "frames": m["frames"], "points": m["points"], "waveform": m["waveform"], "rows": r,
-            "outside": [name for name in ROWS if r[name]["status"] == "outside"]}
+            "outside": [name for name in ROWS if name not in REPORTED and r[name]["status"] == "outside"]}
 
 
 # ------------------------------------------------------------------ the words
@@ -254,10 +243,6 @@ def _n(value, places=2):
     """97.0 -> 97, 1.80 -> 1.8, 0.125 -> 0.13."""
     text = "%.*f" % (places, value)
     return text.rstrip("0").rstrip(".") if "." in text else text
-
-
-def _rgb(values):
-    return "red %s, green %s, blue %s" % tuple(_n(v, 1) for v in values)
 
 
 def sentence(clip, result):
@@ -286,16 +271,6 @@ def sentence(clip, result):
         said = ["%s%% of the %s channel is clipped at %s" % (_n(ends[0][0]), names[ends[0][1]], ends[0][2])]
         said += ["%s%% of the %s at %s" % (_n(s), names[c], end) for s, c, end in ends[1:]]
         parts.append(said[0] if len(said) == 1 else ", ".join(said[:-1]) + " and " + said[-1])
-    pa = r["parade"]
-    if pa["status"] == "outside":
-        if pa["apart"] == ["tops"]:
-            parts.append("the parade's tops sit apart (%s) while its bottoms are level: how light that was meant "
-                         "looks (warm sun, practicals), a strongly coloured thing in the frame, or a cast in the light"
-                         % _rgb(pa["tops"]))
-        else:
-            parts.append("the parade's bottoms sit apart (%s)%s: colour reaching into the blacks (a look's own tint, "
-                         "or a cast through the whole picture)"
-                         % (_rgb(pa["bottoms"]), ", and its tops too" if "tops" in pa["apart"] else ""))
     sk = r["skin"]
     if sk["status"] == "outside":
         parts.append("skin highlights sit at %s%%, %s the 50 to 75%% of one official source (on %d points the grade "
@@ -325,8 +300,8 @@ def summary(per, order):
                         % (_clip_list(rest).capitalize(), "sits" if len(rest) == 1 else "sit"))
         text.append(FLAG_NOTE)
     elif read:
-        text.append("The finished picture of %s sits inside the scopes' table (shadows, highlights, clipping, the "
-                    "parade, and skin where the grade found it)."
+        text.append("The finished picture of %s sits inside the scopes' table (shadows, highlights, clipping, and "
+                    "skin where the grade found it)."
                     % ("the clip" if len(read) == 1 else "every clip read"))
     if unread:
         whys = sorted(set(per[n].get("why") or "" for n in unread))

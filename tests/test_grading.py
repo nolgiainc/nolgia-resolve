@@ -341,7 +341,7 @@ class ScopesTest(unittest.TestCase):
         self.assertEqual(rows["clipping"]["value"], 0.0)
         self.assertEqual(rows["parade"]["tops"], [84.6, 84.6, 84.6])
         self.assertEqual(rows["parade"]["bottoms"], [5.4, 5.4, 5.4])
-        self.assertEqual(rows["parade"]["status"], "inside")
+        self.assertEqual(rows["parade"]["status"], "reported")
         self.assertEqual(rows["saturation"], {"mean": 0.0, "p95": 0.0, "status": "reported"})
         self.assertEqual(rows["skin"]["status"], "not_read")
         self.assertEqual(out["waveform"]["p50"], 45.0)
@@ -358,7 +358,8 @@ class ScopesTest(unittest.TestCase):
         self.assertEqual((rows["clipping"]["value"], rows["clipping"]["by"]), (10.0, 9.9))
         self.assertEqual(rows["clipping"]["pixels"], W * H)
         self.assertEqual(rows["shadows"]["status"], "inside")
-        self.assertEqual(rows["parade"]["status"], "inside")  # tops 100, 98, 96: within 5 points
+        self.assertEqual(rows["parade"]["status"], "reported")
+        self.assertEqual(rows["parade"]["tops_apart"], 4.0)  # tops 100, 98, 96
         self.assertEqual(self.S.sentence(3, out),
                          "Clip 3: highlights reach 98%, the table stops near 90 (10% of the frame is over 90%, where "
                          "the sun, lamps, windows and speculars take about 2%); 10% of the red channel is clipped at "
@@ -381,25 +382,38 @@ class ScopesTest(unittest.TestCase):
             "Clip 1: the darkest 5% sit at 0%, under the 5 to 10% where shadows hold detail; 20% of the red channel "
             "is clipped at black, 20% of the green at black and 20% of the blue at black."))
 
-    def test_a_cast_in_the_tops_only(self):
+    def test_tops_apart_are_reported_not_flagged(self):
+        """Warm light that was meant parts the tops; the check cannot tell it from a cast, so it only reports."""
         out = self.check(warm_tops_picture())
         pa = out["rows"]["parade"]
-        self.assertEqual(out["outside"], ["parade"])
+        self.assertEqual(pa["status"], "reported")
+        self.assertEqual(out["outside"], [])
         self.assertEqual((pa["tops"], pa["tops_apart"], pa["bottoms_apart"]), ([88.0, 80.0, 70.0], 18.0, 0.0))
-        self.assertEqual((pa["apart"], pa["by"]), (["tops"], 13.0))
+        self.assertNotIn("apart", pa)
+        self.assertNotIn("by", pa)
         self.assertEqual(out["rows"]["highlights"]["status"], "inside")
-        self.assertEqual(self.S.sentence(4, out),
-                         "Clip 4: the parade's tops sit apart (red 88, green 80, blue 70) while its bottoms are level: "
-                         "how light that was meant looks (warm sun, practicals), a strongly coloured thing in the "
-                         "frame, or a cast in the light.")
+        self.assertIsNone(self.S.sentence(4, out))
 
-    def test_colour_in_the_blacks(self):
+    def test_bottoms_apart_are_reported_not_flagged(self):
         out = self.check(blue_blacks_picture())
         pa = out["rows"]["parade"]
-        self.assertEqual(pa["bottoms"], [2.0, 4.0, 8.0])
-        self.assertEqual(pa["apart"], ["bottoms"])
-        self.assertIn("the parade's bottoms sit apart (red 2, green 4, blue 8): colour reaching into the blacks",
-                      self.S.sentence(5, out))
+        self.assertEqual(pa["status"], "reported")
+        self.assertEqual(out["outside"], [])
+        self.assertEqual((pa["bottoms"], pa["bottoms_apart"]), ([2.0, 4.0, 8.0], 6.0))
+        self.assertNotIn("apart", pa)
+        self.assertNotIn("by", pa)
+        self.assertIsNone(self.S.sentence(5, out))
+
+    def test_tops_apart_with_the_rest_inside_sit_inside_the_table(self):
+        out = self.check(warm_tops_picture(), skin=[(0.70, 0.55, 0.45)] * 200)
+        self.assertEqual(out["rows"]["parade"]["tops_apart"], 18.0)
+        self.assertEqual(dict((r, out["rows"][r]["status"]) for r in self.S.ROWS),
+                         {"shadows": "inside", "highlights": "inside", "clipping": "inside", "parade": "reported",
+                          "skin": "inside", "saturation": "reported"})
+        said = self.S.summary({1: out}, [1])
+        self.assertEqual((said["outside"], said["unread"]), ([], []))
+        self.assertEqual(said["say"], "The finished picture of the clip sits inside the scopes' table (shadows, "
+                                      "highlights, clipping, and skin where the grade found it).")
 
     def test_clipping_is_counted_on_every_pixel(self):
         """Two one-pixel columns at white, between the grid's points: the grid sees none of it, the count sees all."""
@@ -457,7 +471,7 @@ class ScopesTest(unittest.TestCase):
                 per[n]["say"] = say
         per[6] = {"read": False, "why": "DaVinci Resolve exported no frame"}
         out = self.S.summary(per, [1, 2, 3, 4, 5, 6])
-        self.assertEqual((out["outside"], out["unread"]), ([2, 3, 4, 5], [6]))
+        self.assertEqual((out["outside"], out["unread"]), ([2, 3], [6]))
         self.assertIn("not targets", out["say"])
         self.assertIn("it changed nothing in the grade", out["say"])
         self.assertIn("The finished picture of clip 6 could not be read (DaVinci Resolve exported no frame), so it was "

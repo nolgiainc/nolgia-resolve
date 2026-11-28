@@ -217,8 +217,8 @@ def describe(args, caller="NOLGIA Agent"):
                  "\"NOLGIA grade\"; your own grade stays in the clip's Versions menu.")
     if args["action"] == "apply":
         lines.append("Last, unless the project is colour managed, it reads each clip's finished picture, every node "
-                     "on, against the scopes' table (shadows, highlights, clipping, the parade, skin) and names what "
-                     "sits outside it, for you to look at; that check changes nothing.")
+                     "on, against the scopes' table (shadows, highlights, clipping, skin) and names what sits outside "
+                     "it, for you to look at; that check changes nothing.")
     if "NOLGIA Agent" in (caller or ""):
         lines.append("The grading runs in DaVinci Resolve on this computer and costs no NOLGIA credits; the NOLGIA "
                      "Agent turn that asked for it is billed as usual.")
