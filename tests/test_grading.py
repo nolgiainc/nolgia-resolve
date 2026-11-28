@@ -534,6 +534,7 @@ class FakeGraph(object):
         self.item = item
 
     def ApplyGradeFromDRX(self, path, mode):
+        self.item.events.append(("ApplyGradeFromDRX", os.path.basename(path)))
         with open(path, encoding="utf-8") as handle:
             self.item.nodes = [{"label": l, "params": p, "on": True} for l, p in decode_drx(handle.read())]
         return True
@@ -551,10 +552,12 @@ class FakeGraph(object):
         return []
 
     def SetNodeEnabled(self, i, on):
+        self.item.events.append(("SetNodeEnabled", i, on))
         self.item.nodes[i - 1]["on"] = on
         return True
 
     def SetLUT(self, i, path):
+        self.item.events.append(("SetLUT", i, path))
         self.item.nodes[i - 1]["params"][drx.LUT_PATH] = path.replace("/", "\\")
         return True
 
@@ -565,6 +568,8 @@ class FakeItem(object):
         self.nodes = []
         self.versions = ["Version 1"]
         self.current = "Version 1"
+        self.finished = None  # (width, height, display pixels): the finished picture to serve, else CST OUT's
+        self.events = []      # node changes and exports, in order
 
     def GetName(self):
         return self.name
@@ -599,8 +604,12 @@ class FakeItem(object):
     def GetMediaPoolItem(self):
         return FakeMediaItem(self.name)
 
+    def all_on(self):
+        return len(self.nodes) == len(engine.LABELS) and all(n["on"] for n in self.nodes)
+
     def frame(self):
-        """The clip as exported: scene in DI, through the enabled BALANCE and EXPOSURE offsets."""
+        """The clip as exported: scene in DI, through the enabled BALANCE and EXPOSURE offsets. With every node on,
+        the finished picture: the test's own, or that through CST OUT (CONTRAST to LOOK are not modelled)."""
         pixels = scene(self.gains, self.stops)
         add = [0.0, 0.0, 0.0]
         for node in self.nodes:
@@ -608,7 +617,12 @@ class FakeItem(object):
                 continue
             for k, pid in enumerate(drx.OFFSET):
                 add[k] += node["params"].get(pid, 0.0) * drx.OFFSET_CODE
-        return [[v + a for v, a in zip(p, add)] for p in pixels]
+        graded = [[v + a for v, a in zip(p, add)] for p in pixels]
+        if self.all_on():
+            if self.finished is not None:
+                return self.finished
+            return 64, 36, [C.dwg_to_display(p) for p in graded]
+        return 64, 36, graded
 
 
 class FakeMediaItem(object):
@@ -648,6 +662,9 @@ class FakeOps(object):
         self.root = root
         self.tl = FakeTimeline(items)
         self.changed = False
+        self.science = "davinciYRGB"
+        self.refuse_finished = set()   # clip names whose finished picture Resolve does not export
+        self.garble_finished = set()   # ... or exports as a file that is not a TIFF
 
     # resolve
     def GetCurrentPage(self):
@@ -680,7 +697,16 @@ class FakeOps(object):
         return True
 
     def _export_still(self, project, path):
-        write_tiff(path, 64, 36, self.tl.at().frame())
+        item = self.tl.at()
+        finished = item.all_on()
+        item.events.append(("export", finished))
+        if finished and item.name in self.refuse_finished:
+            return False
+        if finished and item.name in self.garble_finished:
+            with open(path, "wb") as handle:
+                handle.write(b"not a still")
+            return True
+        write_tiff(path, *item.frame())
         return True
 
     def current_item(self, tl):
@@ -691,7 +717,7 @@ class FakeOps(object):
         return "Rooftop"
 
     def GetSetting(self, key):
-        return "davinciYRGB" if key == "colorScienceMode" else ""
+        return self.science if key == "colorScienceMode" else ""
 
     def RefreshLUTList(self):
         return True
@@ -822,6 +848,140 @@ class GraderTest(unittest.TestCase):
     def test_looks_lists_the_library(self):
         out = engine.Grader(self.ops).run(engine.validate_args({"action": "looks"}))
         self.assertEqual(len(out["looks"]), len(looks.LOOKS))
+
+    # .............................................................. the finished picture
+
+    def test_the_finished_picture_says_what_sits_outside(self):
+        self.items[0].finished = (W, H, flat_picture())
+        self.items[1].finished = (W, H, inside_picture())
+        self.items[2].finished = (W, H, clipped_picture())
+        result = engine.Grader(self.ops).run(engine.validate_args({"correct": False, "look": "kodak-2383-print"}))
+        clips = {c["clip"]: c["finished_picture"] for c in result["clips"]}
+        self.assertEqual([clips[n]["outside"] for n in (1, 2, 3)], [["shadows"], [], ["highlights", "clipping"]])
+        self.assertEqual(clips[3]["frames"], 3)  # the grade's own frames, no more
+        self.assertEqual(clips[3]["rows"]["highlights"]["by"], 8.0)
+        self.assertEqual(clips[3]["rows"]["clipping"]["channels"]["r"], [0.0, 10.0])
+        self.assertTrue(clips[3]["say"].startswith("Clip 3: highlights reach 98%, the table stops near 90"))
+        self.assertNotIn("say", clips[2])
+        self.assertIn("correct was off", clips[3]["rows"]["skin"]["why"])
+        summary = result["finished_picture"]
+        self.assertEqual((summary["outside"], summary["unread"]), ([1, 3], []))
+        self.assertTrue(summary["say"].startswith(clips[1]["say"] + " " + clips[3]["say"] + " These are flags"))
+        self.assertIn("shadows", summary["table"])
+        json.dumps(result)  # plain data for the NOLGIA Agent
+        exports = [e for e in self.items[2].events if e[0] == "export"]
+        self.assertEqual(exports, [("export", True)] * 3)  # no measurement with correct off: only the finished frames
+
+    def test_skin_is_read_where_the_grade_found_it(self):
+        result = engine.Grader(self.ops).run(engine.validate_args({"match": 3}))
+        hero = {c["clip"]: c for c in result["clips"]}[3]["finished_picture"]
+        skin = hero["rows"]["skin"]
+        self.assertNotEqual(skin["status"], "not_read")
+        face = C.mat_vec(C.REC709_TO_DWG, [0.52, 0.32, 0.22])
+        shown = C.dwg_to_display([C.di_encode(v) for v in face])  # the hero is not moved: its face through CST OUT
+        self.assertAlmostEqual(skin["value"], 100 * (0.2126 * shown[0] + 0.7152 * shown[1] + 0.0722 * shown[2]),
+                               delta=0.1)
+        self.assertGreater(skin["points"], 1000)
+        self.assertAlmostEqual(skin["share"], skin["points"] * 100.0 / hero["points"], places=2)
+        self.assertEqual(skin["status"], "inside" if 50 <= skin["value"] <= 75 else "outside")
+
+    def test_a_finished_picture_that_cannot_be_read_does_not_fail_the_grade(self):
+        clean = engine.Grader(self.ops).run(engine.validate_args({"match": 3}))
+        self.ops.refuse_finished = {"A_SLOG3.mov"}
+        self.ops.garble_finished = {"B_SLOG3.mov"}
+        result = engine.Grader(self.ops).run(engine.validate_args({"match": 3}))
+        clips = {c["clip"]: c for c in result["clips"]}
+        self.assertEqual(clips[1]["finished_picture"], {"read": False, "why": "DaVinci Resolve exported no frame"})
+        self.assertFalse(clips[2]["finished_picture"]["read"])
+        self.assertTrue(clips[2]["finished_picture"]["why"].startswith("its still could not be read"))
+        self.assertTrue(clips[3]["finished_picture"]["read"])
+        self.assertEqual(result["finished_picture"]["unread"], [1, 2])
+        self.assertIn("The finished picture of clips 1 and 2 could not be read", result["finished_picture"]["say"])
+        self.assertIn("The grade itself is done.", result["finished_picture"]["say"])
+        for a, b in zip(clean["clips"], result["clips"]):
+            self.assertEqual((a["balance_stops"], a["exposure_stops"]), (b["balance_stops"], b["exposure_stops"]))
+        for item in self.items:
+            self.assertEqual([n["label"] for n in item.nodes], list(engine.LABELS))
+            self.assertTrue(all(n["on"] for n in item.nodes))
+
+    def test_the_check_stopping_does_not_fail_the_grade(self):
+        def broken(*args, **kwargs):
+            raise RuntimeError("a bug")
+        for name, why in (("read_still", "its still could not be read: a bug"), ("check", "the check stopped: a bug"),
+                          ("summary", "the check stopped: a bug")):
+            original = getattr(engine.S, name)
+            setattr(engine.S, name, broken)
+            try:
+                result = engine.Grader(self.ops).run(engine.validate_args({"clips": [3], "correct": False}))
+            finally:
+                setattr(engine.S, name, original)
+            self.assertEqual(result["clips"][0]["finished_picture"], {"read": False, "why": why}, name)
+            self.assertEqual(result["finished_picture"]["unread"], [3], name)
+            self.assertEqual([n["label"] for n in self.items[2].nodes], list(engine.LABELS), name)
+
+    def test_the_check_changes_nothing_in_the_node_tree(self):
+        import copy
+        seen = {}
+        original = engine.Grader.finished_pictures
+
+        def watched(grader, clips, *args):
+            seen["before"] = [copy.deepcopy(item.nodes) for item in self.items]
+            marks = [len(item.events) for item in self.items]
+            out = original(grader, clips, *args)
+            seen["after"] = [copy.deepcopy(item.nodes) for item in self.items]
+            seen["during"] = [item.events[m:] for item, m in zip(self.items, marks)]
+            return out
+
+        engine.Grader.finished_pictures = watched
+        try:
+            result = engine.Grader(self.ops).run(engine.validate_args({"match": 3, "look": "kodak-2383-print-warm"}))
+        finally:
+            engine.Grader.finished_pictures = original
+        self.assertEqual(seen["before"], seen["after"])
+        for during in seen["during"]:
+            self.assertEqual(during, [("export", True)] * 3)  # every node on at each export, and no node touched
+        # ... and the grade it leaves is the grade without the check.
+        trees = [copy.deepcopy(item.nodes) for item in self.items]
+        engine.Grader.finished_pictures = lambda grader, clips, *args: dict(
+            (n, {"read": False, "why": "off"}) for n, _ in clips)
+        try:
+            without = engine.Grader(self.ops).run(engine.validate_args({"match": 3, "look": "kodak-2383-print-warm"}))
+        finally:
+            engine.Grader.finished_pictures = original
+        self.assertEqual(trees, [item.nodes for item in self.items])
+        for a, b in zip(result["clips"], without["clips"]):
+            self.assertEqual((a["balance_stops"], a["exposure_stops"], a["nodes"]),
+                             (b["balance_stops"], b["exposure_stops"], b["nodes"]))
+
+    def test_a_colour_managed_project_is_not_read(self):
+        self.ops.science = "davinciYRGBColorManagedv2"
+        result = engine.Grader(self.ops).run(engine.validate_args({"look": "kodak-2383-print"}))
+        for clip in result["clips"]:
+            self.assertFalse(clip["finished_picture"]["read"])
+            self.assertIn("colour managed", clip["finished_picture"]["why"])
+        self.assertEqual(result["finished_picture"]["unread"], [1, 2, 3])
+        self.assertTrue(result["finished_picture"]["say"].startswith("The finished picture was not read (the project "
+                                                                     "is colour managed"))
+        self.assertFalse(any(e[0] == "export" for item in self.items for e in item.events))
+
+    def test_a_long_answer_keeps_what_sits_outside(self):
+        self.items[2].finished = (W, H, clipped_picture())
+        room = engine.RESULT_ROOM
+        engine.RESULT_ROOM = 1000
+        try:
+            result = engine.Grader(self.ops).run(engine.validate_args({"correct": False}))
+        finally:
+            engine.RESULT_ROOM = room
+        self.assertEqual(result["clips"][2]["finished_picture"], {"read": True, "outside": ["highlights", "clipping"]})
+        self.assertIn("too long", result["finished_picture"]["trimmed"])
+        self.assertIn("Clip 3: highlights reach 98%", result["finished_picture"]["say"])
+
+    def test_the_approval_says_the_check_changes_nothing(self):
+        lines = " ".join(engine.describe(engine.validate_args({}))[1])
+        self.assertIn("finished picture", lines)
+        self.assertIn("that check changes nothing", lines)
+        self.assertNotIn("finished picture", " ".join(
+            engine.describe(engine.validate_args({"action": "look", "look": "none"}))[1]))
 
 
 class GradeWindowTest(unittest.TestCase):
