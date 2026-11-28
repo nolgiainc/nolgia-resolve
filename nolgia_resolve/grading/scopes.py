@@ -72,8 +72,9 @@ TABLE = {
                 "channel. None unless meant: at most 0.1%.",
     "parade": "tops and bottoms: each channel's 99.5th and 0.5th percentile (red, green, blue), in % of the range. A "
               "neutral object is level across red, green and blue. Tops apart while the bottoms stay level is how "
-              "light that was meant looks (warm sun, practicals), or a strongly coloured thing in the frame; apart "
-              "at the bottoms too is colour reaching into the blacks (a look's own tint, or a cast through the whole "
+              "light that was meant looks (warm sun, practicals), or a strongly coloured thing in the frame; a cast "
+              "in the light reads the same here, since a display picture barely parts the bottoms for it. Apart at "
+              "the bottoms too is colour reaching into the blacks (a look's own tint, or a cast through the whole "
               "picture). Apart means more than 5 points at the tops or 2 at the bottoms: NOLGIA's own bounds, the "
               "standard gives no number.",
     "skin": "value: skin highlights, the 90th percentile of the skin's level, in % of the range: about 50 to 75% "
@@ -289,7 +290,8 @@ def sentence(clip, result):
     if pa["status"] == "outside":
         if pa["apart"] == ["tops"]:
             parts.append("the parade's tops sit apart (%s) while its bottoms are level: how light that was meant "
-                         "looks (warm sun, practicals), or a strongly coloured thing in the frame" % _rgb(pa["tops"]))
+                         "looks (warm sun, practicals), a strongly coloured thing in the frame, or a cast in the light"
+                         % _rgb(pa["tops"]))
         else:
             parts.append("the parade's bottoms sit apart (%s)%s: colour reaching into the blacks (a look's own tint, "
                          "or a cast through the whole picture)"

@@ -390,8 +390,8 @@ class ScopesTest(unittest.TestCase):
         self.assertEqual(out["rows"]["highlights"]["status"], "inside")
         self.assertEqual(self.S.sentence(4, out),
                          "Clip 4: the parade's tops sit apart (red 88, green 80, blue 70) while its bottoms are level: "
-                         "how light that was meant looks (warm sun, practicals), or a strongly coloured thing in the "
-                         "frame.")
+                         "how light that was meant looks (warm sun, practicals), a strongly coloured thing in the "
+                         "frame, or a cast in the light.")
 
     def test_colour_in_the_blacks(self):
         out = self.check(blue_blacks_picture())
