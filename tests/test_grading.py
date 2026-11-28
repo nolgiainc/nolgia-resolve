@@ -206,10 +206,11 @@ class LibraryTest(unittest.TestCase):
             self.assertFalse(set(looks.file_stem(look)) & set("(),;"), look.name)
 
 
-def write_tiff(path, w, h, pixels):
-    data = b"".join(struct.pack("<HHH", *(max(0, min(65535, int(round(c * 65535)))) for c in p)) for p in pixels)
+def write_tiff(path, w, h, pixels, bits=16):
+    top, fmt = (65535, "<HHH") if bits == 16 else (255, "<BBB")
+    data = b"".join(struct.pack(fmt, *(max(0, min(top, int(round(c * top)))) for c in p)) for p in pixels)
     off = 8 + len(data)
-    entries = [(256, 4, 1, w), (257, 4, 1, h), (258, 3, 1, 16), (259, 3, 1, 1), (262, 3, 1, 2), (273, 4, 1, 8),
+    entries = [(256, 4, 1, w), (257, 4, 1, h), (258, 3, 1, bits), (259, 3, 1, 1), (262, 3, 1, 2), (273, 4, 1, 8),
                (277, 3, 1, 3), (278, 4, 1, h), (279, 4, 1, len(data))]
     out = b"II*\x00" + struct.pack("<I", off) + data + struct.pack("<H", len(entries))
     for tag, kind, n, value in entries:
@@ -267,6 +268,212 @@ class MeasureTest(unittest.TestCase):
         self.assertIn("skin", a)
         self.assertIn("skin", b)
         self.assertAlmostEqual(a["skin_share"], b["skin_share"], delta=0.01)
+
+    def test_skin_says_where_it_is(self):
+        """The points taken as skin are kept by place, for the finished picture's check to read skin there."""
+        grid = scene()
+        m = measure.measure(grid)
+        self.assertEqual(len(m["skin_at"]), round(m["skin_share"] * len(grid)))
+        w = 64
+        for i in m["skin_at"]:
+            x, y = i % w, i // w
+            self.assertTrue(w // 3 <= x < 2 * w // 3 and y < 18, (x, y))  # the face, and nothing else
+
+
+# ------------------------------------------------------------ the finished picture
+
+W, H = measure.GRID  # a still the size of the grid: every pixel is a grid point, so the numbers are exact
+
+
+def ramp(lo, hi, count, tint=(1.0, 1.0, 1.0)):
+    """count display pixels from lo to hi, grey (or tinted)."""
+    return [[(lo + (hi - lo) * i / (count - 1.0)) * t for t in tint] for i in range(count)]
+
+
+def inside_picture():
+    return ramp(0.05, 0.85, W * H)
+
+
+def clipped_picture():
+    """The lowest 81 rows a ramp, the top 9 (a tenth of the frame) a window with its red at the very top."""
+    return ramp(0.05, 0.85, W * 81) + [[1.0, 0.98, 0.96]] * (W * 9)
+
+
+def flat_picture():
+    return ramp(0.30, 0.60, W * H)
+
+
+def warm_tops_picture():
+    """A grey ramp, and warm light in the brightest tenth: the tops apart, the bottoms level."""
+    return ramp(0.05, 0.70, W * 81) + [[0.88, 0.80, 0.70]] * (W * 9)
+
+
+def blue_blacks_picture():
+    return [[0.02, 0.04, 0.08]] * (W * 9) + ramp(0.10, 0.80, W * 81)
+
+
+class ScopesTest(unittest.TestCase):
+    """scopes.py: scopecheck's reading of a finished picture, on stills with known numbers."""
+
+    def setUp(self):
+        from nolgia_resolve.grading import scopes
+        self.S = scopes
+        self.tmp = tempfile.mkdtemp(prefix="nolgia-scopes-")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def still(self, pixels, w=W, h=H, bits=16):
+        path = os.path.join(self.tmp, "f.tif")
+        write_tiff(path, w, h, pixels, bits)
+        return self.S.read_still(path)
+
+    def check(self, pixels, skin=None, why=None):
+        return self.S.check([self.still(pixels)], skin, why)
+
+    def test_inside_the_table(self):
+        out = self.check(inside_picture())
+        self.assertTrue(out["read"])
+        self.assertEqual(out["outside"], [])
+        rows = out["rows"]
+        self.assertEqual(rows["shadows"], {"value": 9.0, "status": "inside"})  # 0.05 + 0.8 * 5%
+        self.assertEqual((rows["highlights"]["value"], rows["highlights"]["status"]), (0.0, "inside"))
+        self.assertEqual(rows["clipping"]["value"], 0.0)
+        self.assertEqual(rows["parade"]["tops"], [84.6, 84.6, 84.6])
+        self.assertEqual(rows["parade"]["bottoms"], [5.4, 5.4, 5.4])
+        self.assertEqual(rows["parade"]["status"], "inside")
+        self.assertEqual(rows["saturation"], {"mean": 0.0, "p95": 0.0, "status": "reported"})
+        self.assertEqual(rows["skin"]["status"], "not_read")
+        self.assertEqual(out["waveform"]["p50"], 45.0)
+        self.assertIsNone(self.S.sentence(3, out))
+
+    def test_clipped(self):
+        out = self.check(clipped_picture())
+        rows = out["rows"]
+        self.assertEqual(out["outside"], ["highlights", "clipping"])
+        self.assertEqual(rows["highlights"]["value"], 10.0)
+        self.assertEqual(rows["highlights"]["by"], 8.0)
+        self.assertEqual(rows["highlights"]["reach"], 98.3)  # the window's level
+        self.assertEqual(rows["clipping"]["channels"], {"r": [0.0, 10.0], "g": [0.0, 0.0], "b": [0.0, 0.0]})
+        self.assertEqual((rows["clipping"]["value"], rows["clipping"]["by"]), (10.0, 9.9))
+        self.assertEqual(rows["clipping"]["pixels"], W * H)
+        self.assertEqual(rows["shadows"]["status"], "inside")
+        self.assertEqual(rows["parade"]["status"], "inside")  # tops 100, 98, 96: within 5 points
+        self.assertEqual(self.S.sentence(3, out),
+                         "Clip 3: highlights reach 98%, the table stops near 90 (10% of the frame is over 90%, where "
+                         "the sun, lamps, windows and speculars take about 2%); 10% of the red channel is clipped at "
+                         "white.")
+
+    def test_low_contrast(self):
+        out = self.check(flat_picture())
+        self.assertEqual(out["outside"], ["shadows"])
+        self.assertEqual(out["rows"]["shadows"], {"value": 31.5, "status": "outside", "side": "over", "by": 21.5})
+        self.assertEqual(self.S.sentence(2, out),
+                         "Clip 2: the darkest 5% sit at 31.5%, over the 10% where shadows that hold detail sit (a "
+                         "lifted or flat picture, unless meant).")
+
+    def test_crushed(self):
+        out = self.check([[0.0, 0.0, 0.0]] * (W * 18) + ramp(0.05, 0.85, W * 72))
+        rows = out["rows"]
+        self.assertEqual(rows["shadows"], {"value": 0.0, "status": "outside", "side": "under", "by": 5.0})
+        self.assertEqual(rows["clipping"]["channels"]["g"], [20.0, 0.0])
+        self.assertTrue(self.S.sentence(1, out).startswith(
+            "Clip 1: the darkest 5% sit at 0%, under the 5 to 10% where shadows hold detail; 20% of the red channel "
+            "is clipped at black, 20% of the green at black and 20% of the blue at black."))
+
+    def test_a_cast_in_the_tops_only(self):
+        out = self.check(warm_tops_picture())
+        pa = out["rows"]["parade"]
+        self.assertEqual(out["outside"], ["parade"])
+        self.assertEqual((pa["tops"], pa["tops_apart"], pa["bottoms_apart"]), ([88.0, 80.0, 70.0], 18.0, 0.0))
+        self.assertEqual((pa["apart"], pa["by"]), (["tops"], 13.0))
+        self.assertEqual(out["rows"]["highlights"]["status"], "inside")
+        self.assertEqual(self.S.sentence(4, out),
+                         "Clip 4: the parade's tops sit apart (red 88, green 80, blue 70) while its bottoms are level: "
+                         "how light that was meant looks (warm sun, practicals), or a strongly coloured thing in the "
+                         "frame.")
+
+    def test_colour_in_the_blacks(self):
+        out = self.check(blue_blacks_picture())
+        pa = out["rows"]["parade"]
+        self.assertEqual(pa["bottoms"], [2.0, 4.0, 8.0])
+        self.assertEqual(pa["apart"], ["bottoms"])
+        self.assertIn("the parade's bottoms sit apart (red 2, green 4, blue 8): colour reaching into the blacks",
+                      self.S.sentence(5, out))
+
+    def test_clipping_is_counted_on_every_pixel(self):
+        """Two one-pixel columns at white, between the grid's points: the grid sees none of it, the count sees all."""
+        w, h = 3 * W, 3 * H
+        pixels = [[1.0] * 3 if x in (0, 240) else [0.5] * 3 for y in range(h) for x in range(w)]
+        still = self.still(pixels, w, h)
+        self.assertFalse(any(max(p) > 0.9 for p in still["grid"]))
+        out = self.S.check([still])
+        self.assertEqual(out["rows"]["highlights"]["value"], 0.0)
+        self.assertEqual(out["rows"]["clipping"]["channels"]["r"], [0.0, round(2 * h * 100.0 / (w * h), 3)])
+        self.assertEqual(out["rows"]["clipping"]["status"], "outside")
+        self.assertEqual(out["points"], W * H)
+        self.assertEqual(out["rows"]["clipping"]["pixels"], w * h)
+
+    def test_the_ends_of_an_8_bit_still(self):
+        values = [0.0, 1 / 255.0, 2 / 255.0, 0.5, 253 / 255.0, 254 / 255.0, 1.0]
+        still = self.still([[v] * 3 for v in values] * 10, 70, 1, bits=8)
+        self.assertEqual(still["ends"]["g"], (20, 20))  # 0 and 1, 254 and 255
+        still16 = self.still([[v] * 3 for v in values] * 10, 70, 1)
+        # 16 bits: 1/255 and 254/255 are codes 257 and 65278, 2 codes past the count's edges (255 and 65280)
+        self.assertEqual(still16["ends"]["g"], (10, 10))
+
+    def test_frames_are_pooled(self):
+        a, b = self.still(inside_picture()), self.still(clipped_picture())
+        out = self.S.check([a, b])
+        self.assertEqual(out["frames"], 2)
+        self.assertEqual(out["rows"]["highlights"]["value"], 5.0)
+        self.assertEqual(out["rows"]["clipping"]["channels"]["r"], [0.0, 5.0])
+
+    def test_skin(self):
+        lit = [(0.70, 0.55, 0.45)] * 200
+        out = self.check(inside_picture(), skin=lit)
+        sk = out["rows"]["skin"]
+        self.assertEqual((sk["value"], sk["status"], sk["points"]), (57.5, "inside", 200))
+        self.assertEqual(sk["share"], round(200 * 100.0 / (W * H), 2))
+        self.assertIsNotNone(sk["hue_off_skin_line_deg"])
+        backlit = self.check(inside_picture(), skin=[(0.45, 0.33, 0.27)] * 200)
+        sk = backlit["rows"]["skin"]
+        self.assertEqual((sk["value"], sk["status"], sk["side"], sk["by"]), (35.1, "outside", "under", 14.9))
+        self.assertEqual(self.S.sentence(2, backlit),
+                         "Clip 2: skin highlights sit at 35.1%, under the 50 to 75% of one official source (on 200 "
+                         "points the grade measured as skin, by colour: check that they are skin).")
+        grey = self.check(inside_picture(), skin=[(0.6, 0.6, 0.6)] * 200)["rows"]["skin"]
+        self.assertIsNone(grey["hue_off_skin_line_deg"])  # a black and white look: no hue to read
+        few = self.check(inside_picture(), skin=[(0.7, 0.55, 0.45)] * 5)["rows"]["skin"]
+        self.assertEqual(few["status"], "not_read")
+
+    def test_the_words_never_say_the_grade_is_wrong(self):
+        per = {}
+        for n, pixels in enumerate((inside_picture(), clipped_picture(), flat_picture(), warm_tops_picture(),
+                                    blue_blacks_picture()), start=1):
+            per[n] = self.check(pixels)
+            say = self.S.sentence(n, per[n])
+            if say:
+                per[n]["say"] = say
+        per[6] = {"read": False, "why": "DaVinci Resolve exported no frame"}
+        out = self.S.summary(per, [1, 2, 3, 4, 5, 6])
+        self.assertEqual((out["outside"], out["unread"]), ([2, 3, 4, 5], [6]))
+        self.assertIn("not targets", out["say"])
+        self.assertIn("it changed nothing in the grade", out["say"])
+        self.assertIn("The finished picture of clip 6 could not be read (DaVinci Resolve exported no frame), so it was "
+                      "not checked. The grade itself is done.", out["say"])
+        words = out["say"].lower() + " ".join(out["table"].values()).lower()
+        for bad in ("wrong", "error", "mistake", "fix", "should", "must", "bad", "fail"):
+            self.assertNotIn(bad, words, bad)
+        self.assertEqual(set(out["table"]), set(self.S.ROWS) | {"flags"})
+        inside = self.S.summary({1: per[1]}, [1])
+        self.assertEqual(inside["outside"], [])
+        self.assertIn("sits inside the scopes' table", inside["say"])
+        many = dict((n, dict(per[2], say="Clip %d: x." % n)) for n in range(1, 14))
+        said = self.S.summary(many, list(range(1, 14)))["say"]
+        self.assertIn("Clip 10: x.", said)
+        self.assertNotIn("Clip 11: x.", said)
+        self.assertIn("Clips 11, 12 and 13 also sit outside the table", said)
 
 
 class ArgsTest(unittest.TestCase):

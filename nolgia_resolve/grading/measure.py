@@ -24,6 +24,11 @@ def read_tiff_grid(path, cols=GRID[0], rows=GRID[1]):
     """(r, g, b) code values 0..1 on a cols x rows grid of an uncompressed 8 or 16-bit RGB TIFF."""
     with open(path, "rb") as handle:
         data = handle.read()
+    return grid_of(data, tiff_layout(data), cols, rows)
+
+
+def tiff_layout(data):
+    """Where the pixels of an uncompressed 8 or 16-bit RGB TIFF are: {order, width, height, bits, spp, start}."""
     order = "<" if data[:2] == b"II" else ">"
     (ifd,) = struct.unpack(order + "I", data[4:8])
     (count,) = struct.unpack(order + "H", data[ifd:ifd + 2])
@@ -39,12 +44,16 @@ def read_tiff_grid(path, cols=GRID[0], rows=GRID[1]):
         else:
             (value,) = struct.unpack(order + "I", entry[8:12])
         tags[tag] = value
-    width, height = tags[256], tags[257]
-    bits = tags.get(258, 8)
     if tags.get(259, 1) != 1:
         raise ValueError("compressed TIFF")
-    spp = tags.get(277, 3)
-    start = tags[273]
+    return {"order": order, "width": tags[256], "height": tags[257], "bits": tags.get(258, 8), "spp": tags.get(277, 3),
+            "start": tags[273]}
+
+
+def grid_of(data, layout, cols=GRID[0], rows=GRID[1]):
+    """(r, g, b) code values 0..1 on a cols x rows grid of the TIFF in data (tiff_layout tells where)."""
+    order, width, height = layout["order"], layout["width"], layout["height"]
+    bits, spp, start = layout["bits"], layout["spp"], layout["start"]
     step = bits // 8
     scale = float((1 << bits) - 1)
     fmt = order + ("H" if step == 2 else "B")
@@ -112,23 +121,31 @@ def measure(grid_di):
     cast = cast_stops(white)
     # ... and its level taken to a fixed white, so exposure does not either.
     lift = 0.5 / max(out["white_y"], 1e-6)
-    skin = skin_pixels(grid_di, [2.0 ** c * lift for c in cast])
+    points = skin_points(grid_di, [2.0 ** c * lift for c in cast])
+    skin = [lin for _, lin in points]
     out["skin_share"] = len(skin) / float(len(grid_di))
     if len(skin) >= max(30, len(grid_di) * 0.01):
         rgb = [_median([p[k] for p in skin]) for k in range(3)]
         out["skin"] = rgb
         out["skin_y"] = wr * rgb[0] + wg * rgb[1] + wb * rgb[2]
+        # Where on the grid: the check of the finished picture reads skin at these same points (scopes.py).
+        out["skin_at"] = [i for i, _ in points]
     return out
 
 
 def skin_pixels(grid_di, gains=(1.0, 1.0, 1.0)):
     """Linear RGB of the pixels whose hue sits near the skin line (in DI), lit (not in deep shadow).
     gains balance the picture first (the white's cast taken out); the pixels come back as they were."""
+    return [lin for _, lin in skin_points(grid_di, gains)]
+
+
+def skin_points(grid_di, gains=(1.0, 1.0, 1.0)):
+    """(index on the grid, linear RGB) of the pixels skin_pixels takes."""
     from .dctl import dwg_luma_weights, skin_angle
     wr, wg, wb = dwg_luma_weights()
     angle = skin_angle()
     out = []
-    for r0, g0, b0 in grid_di:
+    for index, (r0, g0, b0) in enumerate(grid_di):
         r, g, b = (C.di_encode(C.di_decode(v) * k) for v, k in zip((r0, g0, b0), gains))
         y = wr * r + wg * g + wb * b
         if not 0.38 <= y <= 0.68:  # white at 0.5 linear: DI 0.57; skin sits from about 3 stops under it to near it
@@ -139,7 +156,7 @@ def skin_pixels(grid_di, gains=(1.0, 1.0, 1.0)):
             continue
         d = (math.atan2(v, u) - angle + math.pi) % (2 * math.pi) - math.pi
         if abs(d) <= 0.38:
-            out.append((C.di_decode(r0), C.di_decode(g0), C.di_decode(b0)))
+            out.append((index, (C.di_decode(r0), C.di_decode(g0), C.di_decode(b0))))
     return out
 
 
